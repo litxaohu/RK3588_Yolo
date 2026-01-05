@@ -240,6 +240,7 @@ def main():
     parser = argparse.ArgumentParser(description='Real-time object detection on RK3588')
     parser.add_argument('--model_path', type=str, required=True, help='RKNN model path')
     parser.add_argument('--camera_id', type=int, default=1, help='Camera device ID (default: 1 for /dev/video1)')
+    parser.add_argument('--video_path', type=str, help='Path to video file (overrides camera_id)')
     parser.add_argument('--fps', type=int, default=30, help='Target FPS for display')
     args = parser.parse_args()
 
@@ -253,23 +254,31 @@ def main():
     model, platform = setup_model(args.model_path)
     co_helper = COCO_test_helper(enable_letter_box=True)
 
-    # 打开摄像头
-    cap = cv2.VideoCapture(args.camera_id)
-    if not cap.isOpened():
-        print("Error: Cannot open camera /dev/video{}".format(args.camera_id))
-        # 尝试其他摄像头
-        for i in [0, 2, 3]:
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                print(f"Using camera /dev/video{i}")
-                break
-        else:
-            print("Error: No camera found")
+    # 打开视频源
+    if args.video_path:
+        if not os.path.exists(args.video_path):
+            print(f"Error: Video file not found: {args.video_path}")
             return
-
-    # 设置摄像头分辨率（可选）
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        print(f"Opening video file: {args.video_path}")
+        cap = cv2.VideoCapture(args.video_path)
+    else:
+        # 打开摄像头
+        cap = cv2.VideoCapture(args.camera_id)
+        if not cap.isOpened():
+            print("Error: Cannot open camera /dev/video{}".format(args.camera_id))
+            # 尝试其他摄像头
+            for i in [0, 2, 3]:
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    print(f"Using camera /dev/video{i}")
+                    break
+            else:
+                print("Error: No camera found")
+                return
+        
+        # 设置摄像头分辨率（仅对摄像头有效）
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     
     print("Starting real-time detection... Press 'q' to quit, 's' to save current frame")
 
@@ -281,7 +290,10 @@ def main():
         while True:
             ret, frame = cap.read()
             if not ret:
-                print("Error: Cannot read frame from camera")
+                if args.video_path:
+                    print("End of video file")
+                else:
+                    print("Error: Cannot read frame from camera")
                 break
 
             # 预处理
