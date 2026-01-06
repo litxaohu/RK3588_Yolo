@@ -8,10 +8,27 @@ WORKDIR /app
 # libgl1: replacement for libgl1-mesa-glx in Debian 12 (Bookworm)
 # libglib2.0-0: for cv2
 # libgomp1: for OpenMP support if needed
+# libsm6, libxext6, libxrender1: common OpenCV dependencies
+# libxcb-*: dependencies for Qt (bundled in opencv-python) to fix "Could not load the Qt platform plugin 'xcb'"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     libgomp1 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libxcb-cursor0 \
+    libxcb-xinerama0 \
+    libxcb-keysyms1 \
+    libxcb-image0 \
+    libxcb-shm0 \
+    libxcb-icccm4 \
+    libxcb-sync1 \
+    libxcb-xfixes0 \
+    libxcb-shape0 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxkbcommon-x11-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file
