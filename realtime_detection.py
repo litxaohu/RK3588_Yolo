@@ -345,7 +345,10 @@ def main():
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
             # 显示结果
-            cv2.imshow('RK3588 Real-time Detection', frame)
+            window_name = 'RK3588 Real-time Detection'
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(window_name, 1280, 720)
+            cv2.imshow(window_name, frame)
 
             # 按键处理
             key = cv2.waitKey(1) & 0xFF
