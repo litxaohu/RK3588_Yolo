@@ -178,17 +178,23 @@ class RKNNLiteModel:
         if not RKNN_LITE_AVAILABLE:
             raise ImportError("RKNN-Toolkit-Lite2 is not available")
         
+        # 检查模型文件是否存在
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"RKNN model file not found: {model_path}")
+            
         self.rknn_lite = RKNNLite()
         
         # 加载RKNN模型
-        print('Loading RKNN model...')
+        print(f'Loading RKNN model from {model_path}...')
         ret = self.rknn_lite.load_rknn(model_path)
         if ret != 0:
             raise Exception(f"Load RKNN model failed with error code: {ret}")
         
         # 初始化运行时环境
         print('Initializing runtime...')
-        ret = self.rknn_lite.init_runtime()
+        # RK3588 has 3 NPU cores. default core_mask=RKNNLite.NPU_CORE_0
+        # You can specify core_mask=RKNNLite.NPU_CORE_0_1_2 for max performance if needed
+        ret = self.rknn_lite.init_runtime(core_mask=RKNNLite.NPU_CORE_0)
         if ret != 0:
             raise Exception(f"Init runtime environment failed with error code: {ret}")
         

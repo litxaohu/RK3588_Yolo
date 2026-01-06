@@ -27,6 +27,10 @@ COPY rknn-toolkit-lite2-packages/rknn_toolkit_lite2-2.3.2-cp311-cp311-manylinux_
 # Install the local wheel
 RUN pip install --no-cache-dir rknn_toolkit_lite2-2.3.2-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
 
+# Copy librknnrt.so to /usr/lib/
+COPY lib/librknnrt.so /usr/lib/
+RUN chmod 755 /usr/lib/librknnrt.so
+
 # Copy the rest of the application code
 COPY . .
 
