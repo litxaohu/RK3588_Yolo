@@ -289,15 +289,12 @@ def main():
     
     print("Starting real-time detection... Press 'q' to quit, 's' to save current frame")
 
-    # FPS calculation variables
-    fps_frames = 0
-    fps_start_time = time.time()
-    fps_counter = 0
-    
     # 初始化预览窗口
     window_name = 'RK3588 Real-time Detection'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, 1280, 720)
+    
+    fps_counter = 0
     
     try:
         while True:
@@ -314,9 +311,18 @@ def main():
             input_data = processed_img
 
             # 推理
-            start_time = time.time()
+            start_inference_time = time.time()
             outputs = model.run(input_data)
-            inference_time = time.time() - start_time
+            inference_time = time.time() - start_inference_time
+            
+            # 计算基于推理时间的理论 FPS
+            if inference_time > 0:
+                inf_fps = 1.0 / inference_time
+            else:
+                inf_fps = 0
+            
+            # 使用滑动平均使推理 FPS 显示更平滑
+            fps_counter = 0.9 * fps_counter + 0.1 * inf_fps if fps_counter > 0 else inf_fps
             
             # 检查推理结果
             if outputs is None:
@@ -330,16 +336,8 @@ def main():
             if boxes is not None:
                 draw(frame, co_helper.get_real_box(boxes), scores, classes)
 
-            # 计算并显示FPS
-            fps_frames += 1
-            elapsed_time = time.time() - fps_start_time
-            if elapsed_time >= 1.0:
-                fps_counter = fps_frames / elapsed_time
-                fps_frames = 0
-                fps_start_time = time.time()
-
             # 在画面上显示信息
-            cv2.putText(frame, f'FPS: {fps_counter:.1f}', (10, 30), 
+            cv2.putText(frame, f'NPU FPS: {fps_counter:.1f}', (10, 30), 
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             cv2.putText(frame, f'Inference: {inference_time*1000:.1f}ms', (10, 70), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
