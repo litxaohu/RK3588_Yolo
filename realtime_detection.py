@@ -288,12 +288,14 @@ def main():
     
     print("Starting real-time detection... Press 'q' to quit, 's' to save current frame")
 
+    # FPS calculation variables
+    fps_avg_frame_count = 30
+    frame_times = []
     fps_counter = 0
-    fps_time = time.time()
-    frame_count = 0
-
+    
     try:
         while True:
+            loop_start_time = time.time()
             ret, frame = cap.read()
             if not ret:
                 if args.video_path:
@@ -324,12 +326,13 @@ def main():
                 draw(frame, co_helper.get_real_box(boxes), scores, classes)
 
             # 计算并显示FPS
-            frame_count += 1
-            if time.time() - fps_time >= 1.0:
-                fps = frame_count / (time.time() - fps_time)
-                fps_counter = fps
-                frame_count = 0
-                fps_time = time.time()
+            loop_end_time = time.time()
+            frame_times.append(loop_end_time - loop_start_time)
+            if len(frame_times) > fps_avg_frame_count:
+                frame_times.pop(0)
+            
+            if len(frame_times) > 0:
+                fps_counter = len(frame_times) / sum(frame_times)
 
             # 在画面上显示信息
             cv2.putText(frame, f'FPS: {fps_counter:.1f}', (10, 30), 

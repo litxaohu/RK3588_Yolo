@@ -38,7 +38,13 @@ sudo usermod -aG docker $USER
 sudo docker pull ghcr.io/litxaohu/rk3588_yolo:latest
 ```
 
-### 2. 运行检测
+### 2. 配置显示权限
+由于 Docker 容器需要访问宿主机的 X11 显示服务，运行前需在宿主机执行：
+```bash
+xhost +local:docker
+```
+
+### 3. 运行检测
 
 #### 方式 A：使用 USB 摄像头 (推荐)
 将摄像头插入 USB 口，确认设备节点（通常为 `/dev/video0` 或 `/dev/video1`）。
