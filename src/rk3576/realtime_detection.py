@@ -244,7 +244,7 @@ def preprocess_frame(frame, co_helper):
     return img
 
 def main():
-    parser = argparse.ArgumentParser(description='Real-time object detection on RK3588')
+    parser = argparse.ArgumentParser(description='Real-time object detection on RK3576')
     parser.add_argument('--model_path', type=str, required=True, help='RKNN model path')
     parser.add_argument('--camera_id', type=int, default=1, help='Camera device ID (default: 1 for /dev/video1)')
     parser.add_argument('--video_path', type=str, help='Path to video file (overrides camera_id)')
@@ -290,7 +290,7 @@ def main():
     print("Starting real-time detection... Press 'q' to quit, 's' to save current frame")
 
     # 初始化预览窗口
-    window_name = 'RK3588 Real-time Detection'
+    window_name = 'RK3576 Real-time Detection'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, 1280, 720)
     

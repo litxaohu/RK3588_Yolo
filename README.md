@@ -57,8 +57,8 @@ xhost +local:docker
 拉取最新镜像
 
 ```bash
-sudo docker pull ghcr.io/litxaohu/rk3588_yolo:latest
-sudo docker pull ghcr.io/litxaohu/rk3576_yolo:latest
+sudo docker pull ghcr.io/litxaohu/rk3588_yolo/rk3588-yolo:latest
+sudo docker pull ghcr.io/litxaohu/rk3588_yolo/rk3576-yolo:latest
 ```
 
 运行 Docker 容器：
@@ -72,7 +72,7 @@ sudo docker run --rm --privileged --net=host --env DISPLAY=$DISPLAY \
     --device /dev/video0:/dev/video0 \
     --device /dev/dri/renderD128:/dev/dri/renderD129 \
     -v /proc/device-tree/compatible:/proc/device-tree/compatible \
-    ghcr.io/<your-username>/rk3576-yolo:latest
+    ghcr.io/litxaohu/rk3588_yolo/rk3588-yolo:latest
 ```
 
 rk3576:
@@ -84,7 +84,7 @@ sudo docker run --rm --privileged --net=host --env DISPLAY=$DISPLAY \
     --device /dev/video0:/dev/video0 \
     --device /dev/dri/renderD128:/dev/dri/renderD128 \
     -v /proc/device-tree/compatible:/proc/device-tree/compatible \
-    ghcr.io/<your-username>/rk3576-yolo:latest
+    ghcr.io/litxaohu/rk3588_yolo/rk3576-yolo:latest
 ```
 
 > **注意**：对于 RK3576，设备路径改为 `/dev/dri/renderD128`。
