@@ -167,7 +167,8 @@ def post_process(input_data):
 def draw(image, boxes, scores, classes):
     for box, score, cl in zip(boxes, scores, classes):
         top, left, right, bottom = [int(_b) for _b in box]
-        print("%s @ (%d %d %d %d) %.3f" % (CLASSES[cl], top, left, right, bottom, score))
+        # 移除控制台打印，这是提升性能的关键
+        # print("%s @ (%d %d %d %d) %.3f" % (CLASSES[cl], top, left, right, bottom, score))
         cv2.rectangle(image, (top, left), (right, bottom), (255, 0, 0), 2)
         cv2.putText(image, '{0} {1:.2f}'.format(CLASSES[cl], score),
                     (top, left - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
@@ -192,9 +193,9 @@ class RKNNLiteModel:
         
         # 初始化运行时环境
         print('Initializing runtime...')
-        # RK3588 has 3 NPU cores. default core_mask=RKNNLite.NPU_CORE_0
-        # You can specify core_mask=RKNNLite.NPU_CORE_0_1_2 for max performance if needed
-        ret = self.rknn_lite.init_runtime(core_mask=RKNNLite.NPU_CORE_0)
+        # RK3588 has 3 NPU cores. 
+        # Using NPU_CORE_0_1_2 can utilize all 3 cores for better performance
+        ret = self.rknn_lite.init_runtime(core_mask=RKNNLite.NPU_CORE_0_1_2)
         if ret != 0:
             raise Exception(f"Init runtime environment failed with error code: {ret}")
         
@@ -289,8 +290,8 @@ def main():
     print("Starting real-time detection... Press 'q' to quit, 's' to save current frame")
 
     # FPS calculation variables
-    fps_avg_frame_count = 30
-    frame_times = []
+    fps_frames = 0
+    fps_start_time = time.time()
     fps_counter = 0
     
     # 初始化预览窗口
@@ -299,9 +300,7 @@ def main():
     cv2.resizeWindow(window_name, 1280, 720)
     
     try:
-        last_frame_time = time.time()
         while True:
-            # loop_start_time 不再需要，我们使用更准确的帧间间隔
             ret, frame = cap.read()
             if not ret:
                 if args.video_path:
@@ -332,15 +331,12 @@ def main():
                 draw(frame, co_helper.get_real_box(boxes), scores, classes)
 
             # 计算并显示FPS
-            curr_time = time.time()
-            frame_times.append(curr_time - last_frame_time)
-            last_frame_time = curr_time
-            
-            if len(frame_times) > fps_avg_frame_count:
-                frame_times.pop(0)
-            
-            if len(frame_times) > 0:
-                fps_counter = len(frame_times) / sum(frame_times)
+            fps_frames += 1
+            elapsed_time = time.time() - fps_start_time
+            if elapsed_time >= 1.0:
+                fps_counter = fps_frames / elapsed_time
+                fps_frames = 0
+                fps_start_time = time.time()
 
             # 在画面上显示信息
             cv2.putText(frame, f'FPS: {fps_counter:.1f}', (10, 30), 
