@@ -1,19 +1,34 @@
-# RK3588 YOLOv11 Real-time Detection
+# reComputer-RK-CV
 
-本项目基于瑞芯微 RK3588 平台，使用 RKNN-Toolkit2 进行 YOLOv11 目标检测模型的实时推理。项目支持 Docker 容器化部署，提供了完整的环境配置和运行脚本，能够利用 RK3588 的 NPU 进行硬件加速推理。
+本项目旨在为瑞芯微（Rockchip）系列开发板提供工业级、高性能的计算机视觉（CV）应用方案。目前已支持 **RK3588** 和 **RK3576** 平台，主要集成了 YOLOv11 目标检测模型。
 
-## 🌟 项目特性
-- **高性能推理**：利用 RK3588 NPU (6TOPS) 加速 YOLOv11 模型。
-- **容器化部署**：提供 Docker 镜像，一键运行，无需繁琐的环境配置。
-- **多输入支持**：支持 USB 摄像头、本地视频文件、RTSP 流（通过 OpenCV）。
-- **实时可视化**：提供实时检测画面预览，支持 FPS、推理耗时显示。
+## 项目架构
 
-## 🛠️ 环境准备 (RK3588)
+项目采用多平台适配架构，各平台代码和环境配置独立管理：
 
-在 RK3588 开发板（如 Orange Pi 5, Radxa Rock 5B, LubanCat 等）上运行本项目前，需要安装 Docker。
+```text
+reComputer-RK-CV/
+├── docker/                 # Docker 镜像配置文件
+│   ├── rk3576/             # RK3576 专属 Dockerfile
+│   └── rk3588/             # RK3588 专属 Dockerfile
+├── src/                    # 源码目录
+│   ├── rk3576/             # RK3576 源码、模型及依赖库
+│   └── rk3588/             # RK3588 源码、模型及依赖库
+└── .github/workflows/      # GitHub Actions 自动化构建脚本
+```
 
-### 安装 Docker
-在板卡上执行以下命令（需要联网）：
+## 支持平台
+
+| 平台 | 芯片 | 算力 | 镜像名称 |
+| :--- | :--- | :--- | :--- |
+| **RK3588** | RK3588/RK3588S | 6 TOPS | `rk3588-yolo` |
+| **RK3576** | RK3576 | 6 TOPS | `rk3576-yolo` |
+
+## 快速开始
+
+### 1. 安装 Docker
+
+在开发板上执行以下命令安装 Docker：
 
 ```bash
 # 1. 下载安装脚本
@@ -31,103 +46,75 @@ sudo usermod -aG docker $USER
 # 注意：执行完上一条命令后需要注销并重新登录才能生效
 ```
 
-## 🚀 快速开始
+### 2. 运行项目 (以 RK3576 为例)
 
-### 1. 拉取镜像
-```bash
-sudo docker pull ghcr.io/litxaohu/rk3588_yolo:latest
-```
+首先开启 X11 访问权限（用于预览窗口显示）：
 
-### 2. 配置显示权限
-由于 Docker 容器需要访问宿主机的 X11 显示服务，运行前需在宿主机执行：
 ```bash
 xhost +local:docker
 ```
 
-### 3. 运行检测
-
-#### 方式 A：使用 USB 摄像头 (推荐)
-将摄像头插入 USB 口，确认设备节点（通常为 `/dev/video0` 或 `/dev/video1`）。
+拉取最新镜像
 
 ```bash
-# 假设摄像头是 /dev/video0
+sudo docker pull ghcr.io/litxaohu/rk3588_yolo:latest
+sudo docker pull ghcr.io/litxaohu/rk3576_yolo:latest
+```
+
+运行 Docker 容器：
+
+rk3588:
+
+```bash
 sudo docker run --rm --privileged --net=host --env DISPLAY=$DISPLAY \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -v /dev/bus/usb:/dev/bus/usb \
     --device /dev/video0:/dev/video0 \
-    --device /dev/dri/renderD129:/dev/dri/renderD129 \
+    --device /dev/dri/renderD128:/dev/dri/renderD129 \
     -v /proc/device-tree/compatible:/proc/device-tree/compatible \
-    -v $(pwd)/model:/app/model \
-    ghcr.io/litxaohu/rk3588_yolo:latest \
-    python realtime_detection.py --model_path model/yolo11n.rknn --camera_id 0
+    ghcr.io/<your-username>/rk3576-yolo:latest
 ```
-**注意**：
-- `--device /dev/video0:/dev/video0`：将宿主机的摄像头映射到容器。
-- `--camera_id 0`：告诉程序使用索引为 0 的摄像头。
 
-#### 方式 B：使用本地 MP4 视频文件
-将视频文件放在当前目录下（例如 `test.mp4`）。
+rk3576:
 
 ```bash
 sudo docker run --rm --privileged --net=host --env DISPLAY=$DISPLAY \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
-    --device /dev/dri/renderD129:/dev/dri/renderD129 \
+    -v /dev/bus/usb:/dev/bus/usb \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
     -v /proc/device-tree/compatible:/proc/device-tree/compatible \
-    -v $(pwd)/model:/app/model \
-    -v $(pwd)/test.mp4:/app/test.mp4 \
-    ghcr.io/litxaohu/rk3588_yolo:latest \
-    python realtime_detection.py --model_path model/yolo11n.rknn --video_path /app/test.mp4
+    ghcr.io/<your-username>/rk3576-yolo:latest
 ```
 
-## 📂 项目结构
+> **注意**：对于 RK3576，设备路径改为 `/dev/dri/renderD128`。
 
-```text
-RK3588_Yolo/
-├── Dockerfile              # Docker 镜像构建文件
-├── README.md               # 项目说明文档
-├── realtime_detection.py   # 主程序：推理、后处理、显示
-├── requirements.txt        # Python 依赖
-├── model/                  # 存放 RKNN 模型文件
-│   ├── yolo11n.rknn
-│   └── ...
-└── lib/                    # (可选) 存放 librknnrt.so 等动态库
-```
+## 平台详细文档
+
+- [RK3588 使用指南](src/rk3588/README.md)
+- [RK3576 使用指南](src/rk3576/README.md)
+
+## 自动化构建
+
+本项目支持通过 GitHub Actions 自动构建多平台镜像。
+- 当修改 `src/rk3588/` 目录时，会自动触发 `rk3588-yolo` 镜像的构建。
+- 当修改 `src/rk3576/` 目录时，会自动触发 `rk3576-yolo` 镜像的构建。
+- 支持手动触发构建，并可指定 `image_tag`。
 
 ## 💻 二次开发指南
-
 ### 代码说明
-- **`realtime_detection.py`**:
-    - `RKNNLiteModel`: 封装了 RKNN 初始化、加载模型、推理的逻辑。
-    - `preprocess_frame`: 图像预处理（Resize, Padding, Color conversion）。
-    - `post_process`: YOLO 后处理（Box解码, NMS 非极大值抑制）。
-    - `main`: 主循环，处理视频流，调用推理并显示结果。
-
+- `realtime_detection.py`:
+    - RKNNLiteModel: 封装了 RKNN 初始化、加载模型、推理的逻辑。
+    - preprocess_frame: 图像预处理（Resize, Padding, Color conversion）。
+    - post_process: YOLO 后处理（Box解码, NMS 非极大值抑制）。
+    - main: 主循环，处理视频流，调用推理并显示结果。
 ### 修改模型
-1. 将训练好并转换完成的 `.rknn` 模型放入 `model/` 目录。
-2. 运行命令时修改 `--model_path` 参数指向新模型。
+1. 将训练好并转换完成的 .rknn 模型放入 model/ 目录。
+2. 运行命令时修改 --model_path 参数指向新模型。
 
 ### 重新构建镜像
 如果你修改了代码或依赖，需要重新构建 Docker 镜像：
 
-```bash
 # 在项目根目录下执行
 sudo docker build -t rk3588_yolo:local .
-```
-
-构建完成后，使用 `rk3588_yolo:local` 替换命令中的镜像名即可运行。
-
-## ❓ 常见问题 (Troubleshooting)
-
-### Q1: 报错 `Can not find dynamic library on RK3588!` 或缺少 `librknnrt.so`
-**原因**：容器内缺少 RKNN 运行时库。
-**解决**：
-1. 下载 `librknnrt.so` (通常在 RKNN-Toolkit2 仓库中)。
-2. 将其放入项目根目录的 `lib/` 文件夹。
-3. 运行容器时添加映射：`-v $(pwd)/lib/librknnrt.so:/usr/lib/librknnrt.so`。
-
-### Q2: 报错 `Could not load the Qt platform plugin "xcb"`
-**原因**：Docker 镜像缺少 GUI 相关的系统库。
-**解决**：最新版镜像已修复此问题。如果遇到，请尝试更新镜像或手动安装 `libxcb-xinerama0` 等库。
-
-### Q3: 预览画面太大，屏幕放不下
-**解决**：代码中已默认将窗口大小调整为 1280x720。如需自定义，请修改 `realtime_detection.py` 中的 `cv2.resizeWindow` 参数。
+构建完成后，使用 rk3588_yolo:local 替换命令中的镜像名即可运行。
