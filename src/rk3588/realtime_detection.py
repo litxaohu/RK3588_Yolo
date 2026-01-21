@@ -78,7 +78,8 @@ async def index():
     """, media_type="text/html")
 
 def run_fastapi(host, port):
-    uvicorn.run(app, host=host, port=port, log_level="error")
+    # 使用 log_config=None 避开某些环境下 uvicorn 日志配置报错的问题
+    uvicorn.run(app, host=host, port=port, log_level="error", log_config=None)
 
 # --- 原有推理逻辑 ---
 
