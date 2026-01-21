@@ -86,6 +86,14 @@ sudo docker run --rm --privileged --net=host --env DISPLAY=$DISPLAY \
 1.  **本地显示器**：自动弹出实时检测窗口（需连接显示器并执行了 xhost）。
 2.  **Web 浏览器**：在局域网内访问 `http://<开发板IP>:8000` 即可实时预览。
 
+#### 常见问题排查：
+**问题：SSH 远程无屏幕运行报错 `qt.qpa.xcb: could not connect to display`**
+解决方案：在运行命令末尾添加 `--no_gui` 参数，强制关闭本地窗口初始化。
+```bash
+# 示例 (在原有命令末尾追加):
+... python realtime_detection.py --model_path model/yolo11n.rknn --camera_id 0 --no_gui
+```
+
 ---
 
 ## 平台详细文档

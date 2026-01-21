@@ -33,6 +33,8 @@ CLASSES = ("person", "bicycle", "car","motorbike ","aeroplane ","bus ","train","
            "pottedplant","bed","diningtable","toilet ","tvmonitor","laptop	","mouse	","remote ","keyboard ","cell phone","microwave ",
            "oven ","toaster","sink","refrigerator ","book","clock","vase","scissors ","teddy bear ","hair drier", "toothbrush ")
 
+import logging
+
 # --- FastAPI 核心组件 ---
 app = FastAPI(title="reComputer RK-CV Combined Preview")
 latest_frame = None
@@ -80,7 +82,14 @@ async def index():
     """, media_type="text/html")
 
 def run_fastapi(host, port):
-    uvicorn.run(app, host=host, port=port, log_level="error")
+    # 禁用 Uvicorn 的默认日志配置，避免在某些 Docker 环境下报错
+    # ValueError: Unknown level: 'INFO'
+    try:
+        config = uvicorn.Config(app, host=host, port=port, log_config=None)
+        server = uvicorn.Server(config)
+        server.run()
+    except Exception as e:
+        print(f"Failed to start Web Server: {e}")
 
 # --- 原有推理逻辑 ---
 
@@ -235,6 +244,7 @@ def main():
     parser.add_argument('--video_path', type=str, help='Path to video file (overrides camera_id)')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Web server host')
     parser.add_argument('--port', type=int, default=8000, help='Web server port')
+    parser.add_argument('--no_gui', action='store_true', help='Disable local GUI window')
     args = parser.parse_args()
 
     if not RKNN_LITE_AVAILABLE:
@@ -265,11 +275,18 @@ def main():
     # GUI 状态
     show_gui = True
     window_name = 'RK3588 Real-time Detection'
-    if os.environ.get('DISPLAY') is None:
+    
+    if args.no_gui:
+        print("GUI disabled by --no_gui argument. Running in Web-only mode.")
+        show_gui = False
+    elif os.environ.get('DISPLAY') is None:
         print("No DISPLAY detected, running in Web-only mode.")
         show_gui = False
     else:
         try:
+            # 尝试简单检测 Display 是否可用，避免 Qt 硬崩溃
+            # 注意: 这里只能做有限的预防，如果 X11 鉴权失败，cv2.namedWindow 仍可能导致程序终止
+            # 建议在不稳定环境下使用 --no_gui
             cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
             cv2.resizeWindow(window_name, 1280, 720)
         except Exception as e:

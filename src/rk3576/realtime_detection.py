@@ -231,6 +231,7 @@ def main():
     parser.add_argument('--video_path', type=str, help='Path to video file (overrides camera_id)')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Web server host')
     parser.add_argument('--port', type=int, default=8000, help='Web server port')
+    parser.add_argument('--no_gui', action='store_true', help='Disable local GUI window')
     args = parser.parse_args()
 
     if not RKNN_LITE_AVAILABLE:
@@ -261,7 +262,10 @@ def main():
     # GUI 状态
     show_gui = True
     window_name = 'RK3576 Real-time Detection'
-    if os.environ.get('DISPLAY') is None:
+    if args.no_gui:
+        print("GUI disabled by --no_gui argument. Running in Web-only mode.")
+        show_gui = False
+    elif os.environ.get('DISPLAY') is None:
         print("No DISPLAY detected, running in Web-only mode.")
         show_gui = False
     else:
