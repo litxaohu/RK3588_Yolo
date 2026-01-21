@@ -94,6 +94,32 @@ sudo docker run --rm --privileged --net=host --env DISPLAY=$DISPLAY \
 ... python realtime_detection.py --model_path model/yolo11n.rknn --camera_id 0 --no_gui
 ```
 
+### 3. 独立 Web 预览模式 (仅浏览器查看)
+
+如果您只需要通过 Web 浏览器查看预览画面（例如在远程服务器或无显示器环境下运行），可以使用专用的 Web 预览脚本：
+
+**针对 RK3588:**
+```bash
+sudo docker run --rm --privileged --net=host \
+    --device /dev/video1:/dev/video1 \
+    --device /dev/dri/renderD129:/dev/dri/renderD129 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    ghcr.io/litxaohu/recomputer-rk-cv/rk3588-yolo:latest \
+    python web_detection.py --model_path model/yolo11n.rknn --camera_id 1
+```
+
+**针对 RK3576:**
+```bash
+sudo docker run --rm --privileged --net=host \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    ghcr.io/litxaohu/recomputer-rk-cv/rk3576-yolo:latest \
+    python web_detection.py --model_path model/yolo11n.rknn --camera_id 0
+```
+
+访问方式：`http://<开发板IP>:8000`
+
 ---
 
 ## 平台详细文档

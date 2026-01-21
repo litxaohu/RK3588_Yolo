@@ -27,8 +27,16 @@ sudo docker run --rm --privileged --net=host --env DISPLAY=$DISPLAY \
 
 程序将自动尝试打开本地 GUI 窗口。如果没有检测到显示器（或 `DISPLAY` 环境变量为空），将自动降级为 **Web 预览模式**，您可以通过浏览器访问 `http://<IP>:8000` 查看实时画面。
 
-如果您想强制使用 Web 模式，可以添加 `--no_gui` 参数：
+### 独立 Web 预览模式
+
+如果您只需要 Web 预览，可以使用专用脚本：
 
 ```bash
-... python realtime_detection.py --model_path model/yolo11n.rknn --camera_id 0 --no_gui
+sudo docker run --rm --privileged --net=host \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/dri/renderD129:/dev/dri/renderD129 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    ghcr.io/litxaohu/recomputer-rk-cv/rk3588-yolo:latest \
+    python web_detection.py --model_path model/yolo11n.rknn --camera_id 0
 ```
+访问：`http://<IP>:8000`
