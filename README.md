@@ -122,6 +122,50 @@ sudo docker run --rm --privileged --net=host \
 
 ---
 
+## 🔌 API 接口文档
+
+本项目提供了兼容 Ultralytics Cloud API 标准的 RESTful 接口，支持通过 HTTP POST 请求上传图片进行目标检测。
+
+### 1. 模型推理接口 (Predict)
+
+**Endpoint:** `POST /api/models/yolo11/predict`
+
+#### 请求参数 (Multipart/Form-Data):
+- `file`: (必填) 待检测的图片文件。
+- `conf`: (可选) 置信度阈值，范围 0.0-1.0。若未提供，则使用系统默认值。
+- `iou`: (可选) NMS IOU 阈值，范围 0.0-1.0。若未提供，则使用系统默认值。
+
+#### Curl 示例:
+```bash
+curl -X POST "http://<开发板IP>:8000/api/models/yolo11/predict" \
+     -F "file=@/path/to/your/image.jpg" \
+     -F "conf=0.25" \
+     -F "iou=0.45"
+```
+
+#### 响应格式 (JSON):
+```json
+{
+  "success": true,
+  "predictions": [
+    {
+      "class": "person",
+      "confidence": 0.89,
+      "box": {
+        "x1": 100,
+        "y1": 150,
+        "x2": 400,
+        "y2": 600
+      }
+    }
+  ],
+  "image": {
+    "width": 1920,
+    "height": 1080
+  }
+}
+```
+
 ## 平台详细文档
 
 - [RK3588 使用指南](src/rk3588/README.md)

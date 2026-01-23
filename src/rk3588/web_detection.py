@@ -5,9 +5,10 @@ import argparse
 import time
 import numpy as np
 import threading
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 import uvicorn
+from typing import Optional
 
 # 导入共享工具
 from py_utils.coco_utils import COCO_test_helper
@@ -33,8 +34,98 @@ CLASSES = ("person", "bicycle", "car","motorbike ","aeroplane ","bus ","train","
            "pottedplant","bed","diningtable","toilet ","tvmonitor","laptop	","mouse	","remote ","keyboard ","cell phone","microwave ",
            "oven ","toaster","sink","refrigerator ","book","clock","vase","scissors ","teddy bear ","hair drier", "toothbrush ")
 
+# 动态配置参数
+class DetectionConfig:
+    def __init__(self):
+        self.obj_thresh = 0.25
+        self.nms_thresh = 0.45
+        self.lock = threading.Lock()
+
+    def update(self, obj_thresh, nms_thresh):
+        with self.lock:
+            self.obj_thresh = obj_thresh
+            self.nms_thresh = nms_thresh
+
+    def get(self):
+        with self.lock:
+            return self.obj_thresh, self.nms_thresh
+
+det_config = DetectionConfig()
+
 # --- FastAPI 核心组件 ---
 app = FastAPI(title="reComputer RK-CV Web Preview (RK3588)")
+
+@app.get("/api/config")
+async def get_config():
+    obj, nms = det_config.get()
+    return {"obj_thresh": obj, "nms_thresh": nms}
+
+@app.post("/api/config")
+async def update_config(config: dict):
+    det_config.update(config.get("obj_thresh", 0.25), config.get("nms_thresh", 0.45))
+    return {"status": "success"}
+
+# 全局变量用于在 API 接口中访问模型和辅助类
+_global_model = None
+_global_co_helper = None
+
+@app.post("/api/models/yolo11/predict")
+async def predict(
+    file: UploadFile = File(...),
+    conf: Optional[float] = Form(None),
+    iou: Optional[float] = Form(None)
+):
+    if _global_model is None or _global_co_helper is None:
+        return {"success": false, "message": "Model not initialized"}
+
+    try:
+        # 读取上传的文件
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return {"success": False, "message": "Invalid image file"}
+
+        h, w = img.shape[:2]
+
+        # 预处理
+        input_img = preprocess_frame(img, _global_co_helper)
+
+        # 推理
+        outputs = _global_model.run(input_img)
+
+        # 使用请求参数或全局配置
+        current_obj_thresh, current_nms_thresh = det_config.get()
+        target_conf = conf if conf is not None else current_obj_thresh
+        target_iou = iou if iou is not None else current_nms_thresh
+
+        # 后处理 (直接调用逻辑，不使用全局阈值以便支持单次请求覆盖)
+        boxes, classes, scores = post_process_with_thresh(outputs, target_conf, target_iou)
+
+        predictions = []
+        if boxes is not None:
+            for box, score, cl in zip(boxes, scores, classes):
+                predictions.append({
+                    "class": CLASSES[cl],
+                    "confidence": float(score),
+                    "box": {
+                        "x1": int(box[0]),
+                        "y1": int(box[1]),
+                        "x2": int(box[2]),
+                        "y2": int(box[3])
+                    }
+                })
+
+        return {
+            "success": True,
+            "predictions": predictions,
+            "image": {
+                "width": w,
+                "height": h
+            }
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 class FrameBuffer:
     def __init__(self):
@@ -66,13 +157,78 @@ async def video_feed():
 async def index():
     return Response(content="""
     <html>
-      <head><title>reComputer RK-CV Web Preview</title></head>
-      <body style="background-color: #1a1a1a; color: white; text-align: center; font-family: sans-serif;">
-        <h1>reComputer RK-CV Real-time Detection (RK3588 Web Mode)</h1>
-        <div style="margin: 20px auto; display: inline-block; border: 5px solid #333; border-radius: 10px; overflow: hidden;">
-          <img src="/api/video_feed" style="max-width: 100%; height: auto;">
+      <head>
+        <title>reComputer RK-CV Web Preview</title>
+        <style>
+          body { background-color: #1a1a1a; color: white; text-align: center; font-family: sans-serif; margin: 0; padding: 20px; }
+          .container { max-width: 1000px; margin: 0 auto; }
+          .video-box { margin: 20px auto; display: inline-block; border: 5px solid #333; border-radius: 10px; overflow: hidden; background: #000; }
+          .controls { background: #2a2a2a; padding: 20px; border-radius: 10px; display: inline-block; text-align: left; min-width: 400px; }
+          .control-group { margin-bottom: 15px; }
+          .control-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+          .slider-container { display: flex; align-items: center; gap: 15px; }
+          input[type=range] { flex-grow: 1; cursor: pointer; }
+          .value-display { min-width: 50px; font-family: monospace; background: #444; padding: 2px 8px; border-radius: 4px; text-align: center; }
+          h1 { color: #00e676; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>reComputer RK-CV Real-time Detection</h1>
+          <div class="video-box">
+            <img src="/api/video_feed" style="max-width: 100%; height: auto;">
+          </div>
+          
+          <div class="controls">
+            <div class="control-group">
+              <label>Confidence Threshold (置信度阈值)</label>
+              <div class="slider-container">
+                <input type="range" id="confSlider" min="0.01" max="1.0" step="0.01" value="0.25">
+                <span id="confValue" class="value-display">0.25</span>
+              </div>
+            </div>
+            
+            <div class="control-group">
+              <label>IOU Threshold (NMS 阈值)</label>
+              <div class="slider-container">
+                <input type="range" id="iouSlider" min="0.01" max="1.0" step="0.01" value="0.45">
+                <span id="iouValue" class="value-display">0.45</span>
+              </div>
+            </div>
+          </div>
+          <p style="color: #888; margin-top: 20px;">Streaming via FastAPI + MJPEG | Port: 8000</p>
         </div>
-        <p>Streaming via FastAPI + MJPEG | Port: 8000</p>
+
+        <script>
+          const confSlider = document.getElementById('confSlider');
+          const iouSlider = document.getElementById('iouSlider');
+          const confValue = document.getElementById('confValue');
+          const iouValue = document.getElementById('iouValue');
+
+          function updateConfig() {
+            const obj_thresh = parseFloat(confSlider.value);
+            const nms_thresh = parseFloat(iouSlider.value);
+            confValue.innerText = obj_thresh.toFixed(2);
+            iouValue.innerText = nms_thresh.toFixed(2);
+
+            fetch('/api/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ obj_thresh, nms_thresh })
+            });
+          }
+
+          confSlider.oninput = updateConfig;
+          iouSlider.oninput = updateConfig;
+
+          // 初始化获取当前值
+          fetch('/api/config').then(res => res.json()).then(data => {
+            confSlider.value = data.obj_thresh;
+            iouSlider.value = data.nms_thresh;
+            confValue.innerText = data.obj_thresh.toFixed(2);
+            iouValue.innerText = data.nms_thresh.toFixed(2);
+          });
+        </script>
       </body>
     </html>
     """, media_type="text/html")
@@ -83,12 +239,87 @@ def run_fastapi(host, port):
 
 # --- 推理逻辑 ---
 
+def post_process_with_thresh(outputs, obj_thresh, nms_thresh):
+    """
+    后处理逻辑，接受显式的阈值参数
+    """
+    if outputs is None:
+        return None, None, None
+    
+    boxes, scores, classes_conf = [], [], []
+    defualt_branch = 3
+    pair_per_branch = len(outputs) // defualt_branch
+    for i in range(defualt_branch):
+        boxes.append(box_process(outputs[pair_per_branch * i]))
+        classes_conf.append(outputs[pair_per_branch * i + 1])
+        scores.append(np.ones_like(outputs[pair_per_branch * i + 1][:, :1, :, :], dtype=np.float32))
+
+    def sp_flatten(_in):
+        ch = _in.shape[1]
+        _in = _in.transpose(0, 2, 3, 1)
+        return _in.reshape(-1, ch)
+
+    boxes = np.concatenate([sp_flatten(_v) for _v in boxes])
+    classes_conf = np.concatenate([sp_flatten(_v) for _v in classes_conf])
+    scores = np.concatenate([sp_flatten(_v) for _v in scores])
+
+    # filter_boxes logic inline
+    scores_flat = scores.reshape(-1)
+    class_max_score = np.max(classes_conf, axis=-1)
+    classes = np.argmax(classes_conf, axis=-1)
+    _class_pos = np.where(class_max_score * scores_flat >= obj_thresh)
+    
+    scores = (class_max_score * scores_flat)[_class_pos]
+    boxes = boxes[_class_pos]
+    classes = classes[_class_pos]
+
+    if len(classes) == 0:
+        return None, None, None
+
+    nboxes, nclasses, nscores = [], [], []
+    for c in set(classes):
+        inds = np.where(classes == c)[0]
+        b = boxes[inds]
+        s = scores[inds]
+        
+        # NMS core logic
+        x = b[:, 0]
+        y = b[:, 1]
+        w = b[:, 2] - b[:, 0]
+        h = b[:, 3] - b[:, 1]
+        areas = w * h
+        order = s.argsort()[::-1]
+        keep = []
+        while order.size > 0:
+            i = order[0]
+            keep.append(i)
+            xx1 = np.maximum(x[i], x[order[1:]])
+            yy1 = np.maximum(y[i], y[order[1:]])
+            xx2 = np.minimum(x[i] + w[i], x[order[1:]] + w[order[1:]])
+            yy2 = np.minimum(y[i] + h[i], y[order[1:]] + h[order[1:]])
+            w1 = np.maximum(0.0, xx2 - xx1 + 0.00001)
+            h1 = np.maximum(0.0, yy2 - yy1 + 0.00001)
+            inter = w1 * h1
+            ovr = inter / (areas[i] + areas[order[1:]] - inter)
+            inds_nms = np.where(ovr <= nms_thresh)[0]
+            order = order[inds_nms + 1]
+        
+        if len(keep) > 0:
+            nboxes.append(b[keep])
+            nclasses.append(np.full(len(keep), c))
+            nscores.append(s[keep])
+
+    if not nboxes:
+        return None, None, None
+        
+    return np.concatenate(nboxes), np.concatenate(nclasses), np.concatenate(nscores)
+
 def filter_boxes(boxes, box_confidences, box_class_probs):
     """Filter boxes with object threshold."""
     box_confidences = box_confidences.reshape(-1)
     class_max_score = np.max(box_class_probs, axis=-1)
     classes = np.argmax(box_class_probs, axis=-1)
-    _class_pos = np.where(class_max_score* box_confidences >= OBJ_THRESH)
+    _class_pos = np.where(class_max_score* box_confidences >= det_config.obj_thresh)
     scores = (class_max_score* box_confidences)[_class_pos]
     boxes = boxes[_class_pos]
     classes = classes[_class_pos]
@@ -114,7 +345,7 @@ def nms_boxes(boxes, scores):
         h1 = np.maximum(0.0, yy2 - yy1 + 0.00001)
         inter = w1 * h1
         ovr = inter / (areas[i] + areas[order[1:]] - inter)
-        inds = np.where(ovr <= NMS_THRESH)[0]
+        inds = np.where(ovr <= det_config.nms_thresh)[0]
         order = order[inds + 1]
     return np.array(keep)
 
@@ -143,45 +374,8 @@ def box_process(position):
     return xyxy
 
 def post_process(input_data):
-    if input_data is None:
-        return None, None, None
-    boxes, scores, classes_conf = [], [], []
-    defualt_branch=3
-    pair_per_branch = len(input_data)//defualt_branch
-    for i in range(defualt_branch):
-        boxes.append(box_process(input_data[pair_per_branch*i]))
-        classes_conf.append(input_data[pair_per_branch*i+1])
-        scores.append(np.ones_like(input_data[pair_per_branch*i+1][:,:1,:,:], dtype=np.float32))
-
-    def sp_flatten(_in):
-        ch = _in.shape[1]
-        _in = _in.transpose(0,2,3,1)
-        return _in.reshape(-1, ch)
-
-    boxes = [sp_flatten(_v) for _v in boxes]
-    classes_conf = [sp_flatten(_v) for _v in classes_conf]
-    scores = [sp_flatten(_v) for _v in scores]
-    boxes = np.concatenate(boxes)
-    classes_conf = np.concatenate(classes_conf)
-    scores = np.concatenate(scores)
-    boxes, classes, scores = filter_boxes(boxes, scores, classes_conf)
-    nboxes, nclasses, nscores = [], [], []
-    for c in set(classes):
-        inds = np.where(classes == c)
-        b = boxes[inds]
-        c = classes[inds]
-        s = scores[inds]
-        keep = nms_boxes(b, s)
-        if len(keep) != 0:
-            nboxes.append(b[keep])
-            nclasses.append(c[keep])
-            nscores.append(s[keep])
-    if not nclasses and not nscores:
-        return None, None, None
-    boxes = np.concatenate(nboxes)
-    classes = np.concatenate(nclasses)
-    scores = np.concatenate(nscores)
-    return boxes, classes, scores
+    obj, nms = det_config.get()
+    return post_process_with_thresh(input_data, obj, nms)
 
 def draw(image, boxes, scores, classes):
     for box, score, cl in zip(boxes, scores, classes):
@@ -245,9 +439,14 @@ def main():
     web_thread.start()
     print(f"Web Preview started at http://{args.host}:{args.port}")
 
+    global _global_model, _global_co_helper
     # 初始化模型
     model = RKNNLiteModel(args.model_path)
     co_helper = COCO_test_helper(enable_letter_box=True)
+
+    # 导出模型为全局变量
+    _global_model = model
+    _global_co_helper = co_helper
 
     # 打开视频源
     if args.video_path:
