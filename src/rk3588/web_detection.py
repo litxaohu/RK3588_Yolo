@@ -5,10 +5,11 @@ import argparse
 import time
 import numpy as np
 import threading
-from fastapi import FastAPI, Response, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, Response, UploadFile, File, Form, HTTPException
+from fastapi.responses import StreamingResponse, FileResponse
 import uvicorn
-from typing import Optional
+import shutil
+from typing import Optional, List
 
 # 导入共享工具
 from py_utils.coco_utils import COCO_test_helper
@@ -88,6 +89,98 @@ class DetectionConfig:
 
 det_config = DetectionConfig()
 
+# --- 视频分析核心组件 ---
+UPLOAD_DIR = "workspace/uploads"
+OUTPUT_DIR = "workspace/outputs"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+class VideoAnalyzer:
+    def __init__(self, model=None, co_helper=None):
+        self.model = model
+        self.co_helper = co_helper
+        self.is_processing = False
+        self.progress = 0
+        self.current_video = ""
+        self.error_msg = ""
+        self._stop_event = threading.Event()
+        self._thread = None
+
+    def set_engine(self, model, co_helper):
+        self.model = model
+        self.co_helper = co_helper
+
+    def start_analysis(self, input_path, output_path):
+        if self.is_processing:
+            return False
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._process_video, args=(input_path, output_path))
+        self._thread.daemon = True
+        self._thread.start()
+        return True
+
+    def _process_video(self, input_path, output_path):
+        self.is_processing = True
+        self.progress = 0
+        self.error_msg = ""
+        self.current_video = os.path.basename(input_path)
+
+        cap = cv2.VideoCapture(input_path)
+        if not cap.isOpened():
+            self.error_msg = f"Error: Cannot open video {input_path}"
+            self.is_processing = False
+            return
+
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        if total_frames <= 0:
+            self.error_msg = "Error: Invalid total frames"
+            self.is_processing = False
+            cap.release()
+            return
+
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+        frame_idx = 0
+        try:
+            while not self._stop_event.is_set():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # 推理流程
+                if self.model and self.co_helper:
+                    processed_img = preprocess_frame(frame, self.co_helper)
+                    outputs = self.model.run(processed_img)
+                    
+                    if outputs is not None:
+                        obj, nms = det_config.get()
+                        boxes, classes, scores = post_process_with_thresh(outputs, obj, nms)
+                        if boxes is not None:
+                            draw(frame, self.co_helper.get_real_box(boxes), scores, classes)
+
+                out.write(frame)
+                frame_idx += 1
+                self.progress = int((frame_idx / total_frames) * 100)
+                
+        except Exception as e:
+            self.error_msg = f"Process error: {str(e)}"
+        finally:
+            cap.release()
+            out.release()
+            self.is_processing = False
+            if not self.error_msg:
+                self.progress = 100
+
+    def stop(self):
+        self._stop_event.set()
+
+video_analyzer = VideoAnalyzer()
+
 # --- FastAPI 核心组件 ---
 app = FastAPI(title="reComputer RK-CV Web Preview (RK3588)")
 
@@ -100,6 +193,51 @@ async def get_config():
 async def update_config(config: dict):
     det_config.update(config.get("obj_thresh", 0.25), config.get("nms_thresh", 0.45))
     return {"status": "success"}
+
+# --- 视频分析 API ---
+@app.post("/api/video/upload")
+async def upload_video(file: UploadFile = File(...)):
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return {"filename": file.filename, "status": "uploaded"}
+
+@app.get("/api/video/list")
+async def list_videos():
+    uploads = os.listdir(UPLOAD_DIR)
+    outputs = os.listdir(OUTPUT_DIR)
+    return {"uploads": uploads, "outputs": outputs}
+
+@app.post("/api/video/analyze")
+async def analyze_video(filename: str = Form(...)):
+    input_path = os.path.join(UPLOAD_DIR, filename)
+    output_filename = f"analyzed_{filename}"
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
+    
+    if not os.path.exists(input_path):
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    success = video_analyzer.start_analysis(input_path, output_path)
+    if success:
+        return {"status": "started", "output": output_filename}
+    else:
+        return {"status": "error", "message": "Already processing another video"}
+
+@app.get("/api/video/status")
+async def get_analysis_status():
+    return {
+        "is_processing": video_analyzer.is_processing,
+        "progress": video_analyzer.progress,
+        "current_video": video_analyzer.current_video,
+        "error": video_analyzer.error_msg
+    }
+
+@app.get("/api/video/download/{filename}")
+async def download_video(filename: str):
+    file_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path, media_type='video/mp4', filename=filename)
 
 # 全局变量用于在 API 接口中访问模型和辅助类
 _global_model = None
@@ -239,45 +377,118 @@ async def index():
         <title>reComputer RK-CV Web Preview</title>
         <style>
           body { background-color: #1a1a1a; color: white; text-align: center; font-family: sans-serif; margin: 0; padding: 20px; }
-          .container { max-width: 1000px; margin: 0 auto; }
-          .video-box { margin: 20px auto; display: inline-block; border: 5px solid #333; border-radius: 10px; overflow: hidden; background: #000; }
-          .controls { background: #2a2a2a; padding: 20px; border-radius: 10px; display: inline-block; text-align: left; min-width: 400px; }
+          .container { max-width: 1200px; margin: 0 auto; }
+          .video-box { margin: 20px auto; display: inline-block; border: 5px solid #333; border-radius: 10px; overflow: hidden; background: #000; width: 100%; max-width: 800px; }
+          .controls { background: #2a2a2a; padding: 20px; border-radius: 10px; display: inline-block; text-align: left; min-width: 400px; vertical-align: top; margin: 10px; }
           .control-group { margin-bottom: 15px; }
           .control-group label { display: block; margin-bottom: 5px; font-weight: bold; }
           .slider-container { display: flex; align-items: center; gap: 15px; }
           input[type=range] { flex-grow: 1; cursor: pointer; }
           .value-display { min-width: 50px; font-family: monospace; background: #444; padding: 2px 8px; border-radius: 4px; text-align: center; }
           h1 { color: #00e676; }
+          .tab-container { margin-top: 30px; }
+          .tabs { display: flex; justify-content: center; margin-bottom: 20px; border-bottom: 2px solid #333; }
+          .tab { padding: 10px 30px; cursor: pointer; border-bottom: 3px solid transparent; transition: 0.3s; font-weight: bold; }
+          .tab.active { border-bottom-color: #00e676; color: #00e676; }
+          .tab-content { display: none; }
+          .tab-content.active { display: block; }
+          .video-analysis { text-align: left; background: #2a2a2a; padding: 20px; border-radius: 10px; margin: 10px; }
+          .btn { background: #00e676; color: #000; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; margin: 5px; }
+          .btn:hover { background: #00c853; }
+          .btn:disabled { background: #555; cursor: not-allowed; }
+          .progress-container { width: 100%; background: #444; border-radius: 10px; margin: 15px 0; height: 20px; position: relative; overflow: hidden; }
+          .progress-bar { height: 100%; background: #00e676; width: 0%; transition: 0.3s; }
+          .progress-text { position: absolute; width: 100%; text-align: center; top: 0; left: 0; line-height: 20px; font-size: 12px; font-weight: bold; color: #fff; text-shadow: 1px 1px 2px #000; }
+          table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+          th, td { text-align: left; padding: 10px; border-bottom: 1px solid #444; }
+          th { color: #888; }
         </style>
       </head>
       <body>
         <div class="container">
           <h1>reComputer RK-CV Real-time Detection</h1>
-          <div class="video-box">
-            <img src="/api/video_feed" style="max-width: 100%; height: auto;">
-          </div>
           
-          <div class="controls">
-            <div class="control-group">
-              <label>Confidence Threshold (置信度阈值)</label>
-              <div class="slider-container">
-                <input type="range" id="confSlider" min="0.01" max="1.0" step="0.01" value="0.25">
-                <span id="confValue" class="value-display">0.25</span>
-              </div>
+          <div class="tabs">
+            <div class="tab active" onclick="showTab('realtime')">Real-time Detection</div>
+            <div class="tab" onclick="showTab('analysis')">Local Video Analysis</div>
+          </div>
+
+          <div id="realtime" class="tab-content active">
+            <div class="video-box">
+              <img id="streamImg" src="/api/video_feed" style="max-width: 100%; height: auto;">
             </div>
             
-            <div class="control-group">
-              <label>IOU Threshold (NMS 阈值)</label>
-              <div class="slider-container">
-                <input type="range" id="iouSlider" min="0.01" max="1.0" step="0.01" value="0.45">
-                <span id="iouValue" class="value-display">0.45</span>
+            <div class="controls">
+              <div class="control-group">
+                <label>Confidence Threshold (置信度阈值)</label>
+                <div class="slider-container">
+                  <input type="range" id="confSlider" min="0.01" max="1.0" step="0.01" value="0.25">
+                  <span id="confValue" class="value-display">0.25</span>
+                </div>
+              </div>
+              
+              <div class="control-group">
+                <label>IOU Threshold (NMS 阈值)</label>
+                <div class="slider-container">
+                  <input type="range" id="iouSlider" min="0.01" max="1.0" step="0.01" value="0.45">
+                  <span id="iouValue" class="value-display">0.45</span>
+                </div>
               </div>
             </div>
           </div>
+
+          <div id="analysis" class="tab-content">
+            <div class="video-analysis">
+              <h3>Analyze Local Video</h3>
+              <div class="control-group">
+                <label>Upload New Video (.mp4)</label>
+                <input type="file" id="videoUpload" accept=".mp4">
+                <button class="btn" onclick="uploadVideo()">Upload</button>
+              </div>
+
+              <div id="processingArea" style="display: none;">
+                <p id="statusText">Processing: <span id="currentFileName">-</span></p>
+                <div class="progress-container">
+                  <div id="progressBar" class="progress-bar"></div>
+                  <div id="progressText" class="progress-text">0%</div>
+                </div>
+                <p id="errorText" style="color: #ff5252;"></p>
+              </div>
+
+              <div class="control-group">
+                <label>File Management</label>
+                <button class="btn" onclick="refreshFileList()">Refresh List</button>
+                <table>
+                  <thead>
+                    <tr><th>File Name</th><th>Action</th></tr>
+                  </thead>
+                  <tbody id="fileTableBody">
+                    <!-- Files will be listed here -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          
           <p style="color: #888; margin-top: 20px;">Streaming via FastAPI + MJPEG | Port: 8000</p>
         </div>
 
         <script>
+          function showTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            event.currentTarget.classList.add('active');
+            
+            // 如果是实时流，确保图片 src 正确
+            if (tabId === 'realtime') {
+                document.getElementById('streamImg').src = '/api/video_feed';
+            } else {
+                document.getElementById('streamImg').src = '';
+                refreshFileList();
+            }
+          }
+
           const confSlider = document.getElementById('confSlider');
           const iouSlider = document.getElementById('iouSlider');
           const confValue = document.getElementById('confValue');
@@ -305,6 +516,99 @@ async def index():
             iouSlider.value = data.nms_thresh;
             confValue.innerText = data.obj_thresh.toFixed(2);
             iouValue.innerText = data.nms_thresh.toFixed(2);
+          });
+
+          // 视频分析逻辑
+          async function uploadVideo() {
+            const fileInput = document.getElementById('videoUpload');
+            if (!fileInput.files[0]) return alert('Please select a file');
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            
+            const btn = event.currentTarget;
+            btn.disabled = true;
+            btn.innerText = 'Uploading...';
+            
+            try {
+                await fetch('/api/video/upload', { method: 'POST', body: formData });
+                alert('Upload successful');
+                refreshFileList();
+            } catch (e) {
+                alert('Upload failed');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Upload';
+            }
+          }
+
+          async function refreshFileList() {
+            const res = await fetch('/api/video/list');
+            const data = await res.json();
+            const tbody = document.getElementById('fileTableBody');
+            tbody.innerHTML = '';
+            
+            // 上传的原始文件
+            data.uploads.forEach(f => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${f} (Original)</td>
+                    <td><button class="btn" onclick="analyzeVideo('${f}')">Analyze</button></td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            // 分析后的结果文件
+            data.outputs.forEach(f => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${f} (Analyzed)</td>
+                    <td><button class="btn" onclick="window.open('/api/video/download/${f}')">Download</button></td>
+                `;
+                tbody.appendChild(tr);
+            });
+          }
+
+          async function analyzeVideo(filename) {
+            const formData = new FormData();
+            formData.append('filename', filename);
+            const res = await fetch('/api/video/analyze', { method: 'POST', body: formData });
+            const data = await res.json();
+            
+            if (data.status === 'started') {
+                startStatusPolling();
+            } else {
+                alert(data.message || 'Error starting analysis');
+            }
+          }
+
+          let pollInterval;
+          function startStatusPolling() {
+            document.getElementById('processingArea').style.display = 'block';
+            if (pollInterval) clearInterval(pollInterval);
+            
+            pollInterval = setInterval(async () => {
+                const res = await fetch('/api/video/status');
+                const data = await res.json();
+                
+                document.getElementById('currentFileName').innerText = data.current_video;
+                document.getElementById('progressBar').style.width = data.progress + '%';
+                document.getElementById('progressText').innerText = data.progress + '%';
+                document.getElementById('errorText').innerText = data.error || '';
+                
+                if (!data.is_processing && data.progress === 100) {
+                    clearInterval(pollInterval);
+                    alert('Analysis completed!');
+                    refreshFileList();
+                } else if (!data.is_processing && data.error) {
+                    clearInterval(pollInterval);
+                }
+            }, 1000);
+          }
+
+          // 页面加载时检查状态
+          fetch('/api/video/status').then(res => res.json()).then(data => {
+            if (data.is_processing) startStatusPolling();
           });
         </script>
       </body>
@@ -553,20 +857,33 @@ def main():
     if args.class_path:
         load_classes(args.class_path)
 
+    global _global_model, _global_co_helper
+    # 初始化模型
+    model = RKNNLiteModel(args.model_path)
+    co_helper = COCO_test_helper(enable_letter_box=True)
+
+    # 导出模型为全局变量并设置分析器
+    _global_model = model
+    _global_co_helper = co_helper
+    video_analyzer.set_engine(model, co_helper)
+
     # 启动 Web 服务器线程
     web_thread = threading.Thread(target=run_fastapi, args=(args.host, args.port), daemon=True)
     web_thread.start()
     print(f"Web Preview started at http://{args.host}:{args.port}", flush=True)
     sys.stdout.flush()
 
-    global _global_model, _global_co_helper
-    # 初始化模型
-    model = RKNNLiteModel(args.model_path)
-    co_helper = COCO_test_helper(enable_letter_box=True)
-
-    # 导出模型为全局变量
-    _global_model = model
-    _global_co_helper = co_helper
+    # 如果 camera_id 为 -1，则进入纯 Web 模式（视频文件分析模式）
+    if args.camera_id == -1:
+        print("Running in Video Analysis Mode. Access Web UI to process local videos.", flush=True)
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("Interrupted by user")
+        finally:
+            model.release()
+        return
 
     # 打开视频源
     if args.video_path:
