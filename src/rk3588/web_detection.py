@@ -211,11 +211,22 @@ async def list_videos():
 @app.post("/api/video/analyze")
 async def analyze_video(filename: str = Form(...)):
     input_path = os.path.join(UPLOAD_DIR, filename)
-    output_filename = f"analyzed_{filename}"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
-    
     if not os.path.exists(input_path):
         raise HTTPException(status_code=404, detail="Video not found")
+    
+    # 获取视频分辨率以生成文件名
+    cap = cv2.VideoCapture(input_path)
+    if not cap.isOpened():
+        raise HTTPException(status_code=400, detail="Cannot open video file")
+    
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    
+    # 格式化输出文件名：原名_宽x高_results.mp4
+    name_base = os.path.splitext(filename)[0]
+    output_filename = f"{name_base}_{width}x{height}_results.mp4"
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
     
     success = video_analyzer.start_analysis(input_path, output_path)
     if success:
