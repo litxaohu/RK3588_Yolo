@@ -60,15 +60,10 @@ jobs:
           REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_BASE="${{ matrix.platform }}-yolo"
           
-          # 处理 rk3576 的特殊命名要求 (rk35756)
-          if [[ "${{ matrix.platform }}" == "rk3576" ]]; then
-            IMAGE_BASE="rk35756-yolo"
-          fi
-
           # 根据分支判断镜像路径
           if [[ "${{ github.ref_name }}" == "debug" ]]; then
-            # debug 分支特定命名: recomputer-rk-cv/debug/...
-            GHCR_IMAGE="ghcr.io/recomputer-rk-cv/debug/${IMAGE_BASE}"
+            # debug 分支特定命名: litxaohu/recomputer-rk-cv/debug/...
+            GHCR_IMAGE="ghcr.io/litxaohu/recomputer-rk-cv/debug/${IMAGE_BASE}"
           else
             GHCR_IMAGE="ghcr.io/${REPO_NAME}/${IMAGE_BASE}"
           fi
