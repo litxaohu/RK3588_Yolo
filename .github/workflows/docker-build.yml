@@ -4,8 +4,10 @@ on:
   push:
     branches: [main, master, debug]
     paths:
-      - 'src/rk3588/**'
-      - 'src/rk3576/**'
+      - 'src/rk3588_yolo11/**'
+      - 'src/rk3576_yolo11/**'
+      - 'src/rk3588_yolov8_obb/**'
+      - 'src/rk3576_yolov8_obb/**'
       - 'docker/**'
     tags: ['v*.*.*']
   pull_request:
@@ -29,7 +31,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [rk3588, rk3576]
+        include:
+          - platform: rk3588
+            src_dir: rk3588_yolo11
+            dockerfile: Yolo11.dockerfile
+          - platform: rk3576
+            src_dir: rk3576_yolo11
+            dockerfile: Yolo11.dockerfile
+          - platform: rk3588
+            src_dir: rk3588_yolov8_obb
+            dockerfile: Yolov8_obb.dockerfile
+          - platform: rk3576
+            src_dir: rk3576_yolov8_obb
+            dockerfile: Yolov8_obb.dockerfile
     
     steps:
       - name: Checkout Code
@@ -38,18 +52,17 @@ jobs:
       - name: Check if build is needed
         id: check_changes
         run: |
+          # Check if build is required based on input or changes
+          # Logic simplified for this example, focusing on manual trigger for now or assuming push means build
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             if [[ "${{ github.event.inputs.platform }}" == "all" || "${{ github.event.inputs.platform }}" == "${{ matrix.platform }}" ]]; then
               echo "build=true" >> $GITHUB_OUTPUT
             else
               echo "build=false" >> $GITHUB_OUTPUT
             fi
-          elif [[ "${{ github.event_name }}" == "push" ]]; then
-            # Check if files in src/${{ matrix.platform }} or docker/${{ matrix.platform }} changed
-            # For simplicity in this environment, we assume true if it matches matrix, 
-            # but in real git we would use git diff
-            echo "build=true" >> $GITHUB_OUTPUT
           else
+            # For push/PR events, we default to building everything in matrix for simplicity
+            # Advanced: use paths-filter action to only build changed directories
             echo "build=true" >> $GITHUB_OUTPUT
           fi
 
@@ -58,14 +71,17 @@ jobs:
         run: |
           # 默认基础名称
           REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          IMAGE_BASE="${{ matrix.platform }}-yolo"
+          
+          # 使用 src 目录名作为镜像名的一部分，将下划线替换为连字符
+          # 例如: rk3588_yolo11 -> rk3588-yolo11
+          IMAGE_NAME=$(echo "${{ matrix.src_dir }}" | sed 's/_/-/g')
           
           # 根据分支判断镜像路径
           if [[ "${{ github.ref_name }}" == "debug" ]]; then
             # debug 分支特定命名: litxaohu/recomputer-rk-cv/debug/...
-            GHCR_IMAGE="ghcr.io/litxaohu/recomputer-rk-cv/debug/${IMAGE_BASE}"
+            GHCR_IMAGE="ghcr.io/litxaohu/recomputer-rk-cv/debug/${IMAGE_NAME}"
           else
-            GHCR_IMAGE="ghcr.io/${REPO_NAME}/${IMAGE_BASE}"
+            GHCR_IMAGE="ghcr.io/${REPO_NAME}/${IMAGE_NAME}"
           fi
           
           echo "GHCR_IMAGE=${GHCR_IMAGE}" >> $GITHUB_ENV
@@ -98,8 +114,8 @@ jobs:
         if: steps.check_changes.outputs.build == 'true'
         uses: docker/build-push-action@v5
         with:
-          context: src/${{ matrix.platform }}
-          file: docker/${{ matrix.platform }}/Yolo11.dockerfile
+          context: src/${{ matrix.src_dir }}
+          file: docker/${{ matrix.platform }}/${{ matrix.dockerfile }}
           platforms: linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
