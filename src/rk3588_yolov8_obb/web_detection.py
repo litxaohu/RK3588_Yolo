@@ -443,23 +443,29 @@ def main():
                 else:
                     break
 
-            # Save raw frame for API
-            frame_buffer.set_frame(None, raw_frame=frame)
+            # We don't set frame to None here, otherwise the web feed will flicker or show nothing.
+            # We will set both encoded and raw frame at the end of the loop.
+            
+            try:
+                # Preprocess
+                input_img, ratio, (dw, dh) = preprocess_frame_with_info(frame, _global_co_helper)
 
-            # Preprocess
-            input_img, ratio, (dw, dh) = preprocess_frame_with_info(frame, _global_co_helper)
+                # Inference
+                outputs = _global_model.run(input_img)
 
-            # Inference
-            outputs = _global_model.run(input_img)
+                # Postprocess
+                obj_thresh, nms_thresh = det_config.get()
+                boxes = post_process_obb(outputs, obj_thresh, nms_thresh)
 
-            # Postprocess
-            obj_thresh, nms_thresh = det_config.get()
-            boxes = post_process_obb(outputs, obj_thresh, nms_thresh)
-
-            # Draw
-            draw_frame = frame.copy()
-            if boxes:
-                draw_obb(draw_frame, boxes, ratio, dw, dh)
+                # Draw
+                draw_frame = frame.copy()
+                if boxes:
+                    draw_obb(draw_frame, boxes, ratio, dw, dh)
+            except Exception as e:
+                print(f"Error during processing: {e}")
+                import traceback
+                traceback.print_exc()
+                draw_frame = frame.copy()
 
             # Encode for Web
             ret, buffer = cv2.imencode('.jpg', draw_frame)
