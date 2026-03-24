@@ -5,8 +5,8 @@ import argparse
 import time
 import numpy as np
 import threading
-from fastapi import FastAPI, Response, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, Response, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import StreamingResponse, FileResponse
 import uvicorn
 from typing import Optional
 
@@ -231,6 +231,12 @@ async def video_feed():
             time.sleep(0.03)
     return StreamingResponse(generate(), media_type="multipart/x-mixed-replace; boundary=frame")
 
+@app.get("/api/download_video")
+async def download_video():
+    if os.path.exists("output_analyzed.mp4"):
+        return FileResponse("output_analyzed.mp4", media_type="video/mp4", filename="analyzed_test.mp4")
+    return {"error": "Video not ready or not recording."}
+
 @app.get("/")
 async def index():
     return Response(content="""
@@ -254,6 +260,9 @@ async def index():
           </div>
           <div class="controls">
             <p>Use /api/config to change thresholds.</p>
+            <br>
+            <a href="/api/download_video" target="_blank" style="background: #00e676; color: #000; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Download Analyzed Video</a>
+            <p style="font-size: 12px; color: #aaa; margin-top: 10px;">(Only available if running with a video file, it records the first loop)</p>
           </div>
         </div>
       </body>
@@ -444,11 +453,29 @@ def main():
         print("Error: Could not open video source.")
         return
 
+    # Initialize VideoWriter if processing a video file
+    video_writer = None
+    if args.video_path:
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0 or np.isnan(fps): fps = 25.0
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        if w == 0 or h == 0:
+            w, h = 1280, 720
+        # Use avc1 or mp4v for standard MP4
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer = cv2.VideoWriter("output_analyzed.mp4", fourcc, fps, (w, h))
+        print(f"Recording analyzed video to output_analyzed.mp4")
+
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
                 if args.video_path: # Loop video
+                    if video_writer:
+                        video_writer.release()
+                        video_writer = None
+                        print("Finished recording the first loop to output_analyzed.mp4")
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 else:
@@ -472,11 +499,17 @@ def main():
                 draw_frame = frame.copy()
                 if boxes:
                     draw_obb(draw_frame, boxes, ratio, dw, dh)
+                    
+                if video_writer:
+                    video_writer.write(draw_frame)
+                    
             except Exception as e:
                 print(f"Error during processing: {e}")
                 import traceback
                 traceback.print_exc()
                 draw_frame = frame.copy()
+                if video_writer:
+                    video_writer.write(draw_frame)
 
             # Encode for Web
             try:
