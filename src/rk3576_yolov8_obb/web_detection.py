@@ -396,7 +396,7 @@ def preprocess_frame_with_info(frame, co_helper):
 def main():
     parser = argparse.ArgumentParser(description='YOLOv8-OBB detection on RK3576')
     parser.add_argument('--model_path', type=str, required=True, help='RKNN model path')
-    parser.add_argument('--camera_id', type=int, default=0, help='Camera device ID')
+    parser.add_argument('--camera_id', type=int, default=-1, help='Camera device ID. If not provided (-1), defaults to using video/test.mp4')
     parser.add_argument('--video_path', type=str, help='Path to video file')
     parser.add_argument('--class_path', type=str, help='Path to class_config.txt')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Web server host')
@@ -421,6 +421,17 @@ def main():
 
     # Main Loop
     cap = None
+    
+    # If no explicit video path and no explicit camera id (or camera_id is default -1)
+    if not args.video_path and args.camera_id == -1:
+        default_video = os.path.join(os.path.dirname(__file__), 'video', 'test.mp4')
+        if os.path.exists(default_video):
+            print(f"No camera_id or video_path specified. Using default video: {default_video}")
+            args.video_path = default_video
+        else:
+            print(f"Warning: Default video {default_video} not found. Falling back to camera 0.")
+            args.camera_id = 0
+
     if args.video_path:
         cap = cv2.VideoCapture(args.video_path)
     else:
@@ -453,24 +464,30 @@ def main():
                 # Inference
                 outputs = _global_model.run(input_img)
 
-                # Postprocess
-                obj_thresh, nms_thresh = det_config.get()
-                boxes = post_process_obb(outputs, obj_thresh, nms_thresh)
+            # Postprocess
+            obj_thresh, nms_thresh = det_config.get()
+            boxes = post_process_obb(outputs, obj_thresh, nms_thresh)
 
-                # Draw
-                draw_frame = frame.copy()
-                if boxes:
-                    draw_obb(draw_frame, boxes, ratio, dw, dh)
-            except Exception as e:
-                print(f"Error during processing: {e}")
-                import traceback
-                traceback.print_exc()
-                draw_frame = frame.copy()
+            # Draw
+            draw_frame = frame.copy()
+            if boxes:
+                draw_obb(draw_frame, boxes, ratio, dw, dh)
+        except Exception as e:
+            print(f"Error during processing: {e}")
+            import traceback
+            traceback.print_exc()
+            draw_frame = frame.copy()
 
-            # Encode for Web
+        # Encode for Web
+        try:
             ret, buffer = cv2.imencode('.jpg', draw_frame)
             if ret:
                 frame_buffer.set_frame(buffer.tobytes(), raw_frame=frame)
+        except Exception as e:
+            print(f"Error encoding frame: {e}")
+            
+        # Yield execution to other threads
+        time.sleep(0.001)
 
             # Optional: Local Display if available
             if os.environ.get('DISPLAY'):
