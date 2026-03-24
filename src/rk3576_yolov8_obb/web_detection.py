@@ -465,29 +465,29 @@ def main():
                 outputs = _global_model.run(input_img)
 
             # Postprocess
-            obj_thresh, nms_thresh = det_config.get()
-            boxes = post_process_obb(outputs, obj_thresh, nms_thresh)
+                obj_thresh, nms_thresh = det_config.get()
+                boxes = post_process_obb(outputs, obj_thresh, nms_thresh)
 
-            # Draw
-            draw_frame = frame.copy()
-            if boxes:
-                draw_obb(draw_frame, boxes, ratio, dw, dh)
-        except Exception as e:
-            print(f"Error during processing: {e}")
-            import traceback
-            traceback.print_exc()
-            draw_frame = frame.copy()
+                # Draw
+                draw_frame = frame.copy()
+                if boxes:
+                    draw_obb(draw_frame, boxes, ratio, dw, dh)
+            except Exception as e:
+                print(f"Error during processing: {e}")
+                import traceback
+                traceback.print_exc()
+                draw_frame = frame.copy()
 
-        # Encode for Web
-        try:
-            ret, buffer = cv2.imencode('.jpg', draw_frame)
-            if ret:
-                frame_buffer.set_frame(buffer.tobytes(), raw_frame=frame)
-        except Exception as e:
-            print(f"Error encoding frame: {e}")
-            
-        # Yield execution to other threads
-        time.sleep(0.001)
+            # Encode for Web
+            try:
+                ret, buffer = cv2.imencode('.jpg', draw_frame)
+                if ret:
+                    frame_buffer.set_frame(buffer.tobytes(), raw_frame=frame)
+            except Exception as e:
+                print(f"Error encoding frame: {e}")
+                
+            # Yield execution to other threads
+            time.sleep(0.001)
 
             # Optional: Local Display if available
             if os.environ.get('DISPLAY'):
