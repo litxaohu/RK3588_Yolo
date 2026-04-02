@@ -8,6 +8,7 @@ It is based on the structure of the RK3576 YOLO example but adapted for rotated 
 - **OBB Support**: Supports rotated bounding boxes (x, y, w, h, angle).
 - **Flexible Input**: Supports camera and local MP4 video input.
 - **Web Preview**: Real-time web preview via FastAPI.
+- **Video Download**: Automatically records the first loop of video processing and allows downloading via Web UI for easy debugging.
 
 ## Directory Structure
 - `lib/`: Should contain `librknnrt.so` for RK3576 (if needed by C++ parts, here purely Python).
@@ -27,6 +28,9 @@ pip install shapely fastapi uvicorn
 
 # Run
 python web_detection.py --model_path model/yolov8_obb.rknn --camera_id 0
+
+# Run with default video loop (video/test.mp4) to enable video download feature for debugging
+python web_detection.py --model_path model/yolov8_obb.rknn --camera_id -1
 ```
 
 Access via: `http://<Board_IP>:8000`
