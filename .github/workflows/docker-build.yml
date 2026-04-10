@@ -8,6 +8,8 @@ on:
       - 'src/rk3576_yolo11/**'
       - 'src/rk3588_yolov8_obb/**'
       - 'src/rk3576_yolov8_obb/**'
+      - 'src/rk3588_yolov8_pose/**'
+      - 'src/rk3576_yolov8_pose/**'
       - 'docker/**'
     tags: ['v*.*.*']
   pull_request:
@@ -44,6 +46,12 @@ jobs:
           - platform: rk3576
             src_dir: rk3576_yolov8_obb
             dockerfile: Yolov8_obb.dockerfile
+          - platform: rk3588
+            src_dir: rk3588_yolov8_pose
+            dockerfile: Yolov8_pose.dockerfile
+          - platform: rk3576
+            src_dir: rk3576_yolov8_pose
+            dockerfile: Yolov8_pose.dockerfile
     
     steps:
       - name: Checkout Code
