@@ -143,6 +143,9 @@ class VideoAnalyzer:
                 frame_idx += 1
                 self.progress = int((frame_idx / total_frames) * 100)
                 
+                # Sleep briefly to yield execution and prevent freezing the web API
+                time.sleep(0.001)
+                
         except Exception as e:
             self.error_msg = f"Process error: {str(e)}"
         finally:
@@ -556,7 +559,11 @@ async def index():
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.getElementById(tabId).classList.add('active');
-            event.currentTarget.classList.add('active');
+            
+            // Set active class to the clicked tab without relying on global event
+            const tabs = document.querySelectorAll('.tab');
+            if (tabId === 'realtime' && tabs.length > 0) tabs[0].classList.add('active');
+            if (tabId === 'analysis' && tabs.length > 1) tabs[1].classList.add('active');
             
             // If realtime, ensure correct src
             if (tabId === 'realtime') {{
