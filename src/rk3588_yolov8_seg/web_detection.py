@@ -213,6 +213,7 @@ async def download_video(filename: str):
 _global_model = None
 _global_co_helper = None
 
+@app.post("/api/models/yolov8_seg/predict")
 @app.post("/api/models/yolo11/predict")
 async def predict(
     file: Optional[UploadFile] = File(None),

@@ -1,78 +1,160 @@
-# RK3588 YOLOv8-Seg Instance Segmentation & Web Preview
+# RK3588 YOLOv8-Seg Deployment Guide
 
-This project implements high-performance deployment of the YOLOv8-Seg instance segmentation model on the Rockchip RK3588 platform based on RKNN-Toolkit-Lite2. It uses a pure Python architecture, integrating FastAPI to provide Web APIs and MJPEG video streaming.
+[English] | [中文](./README_zh.md)
+
+This directory contains YOLOv8-Seg instance segmentation inference code optimized for RK3588.
 
 **Special Note**: The segmentation post-processing logic in this project (including bounding box decoding, NMS, mask parsing, scaling, and contour extraction) has been **completely rewritten using pure Numpy and OpenCV**, thoroughly removing the heavy dependencies on `torch` and `torchvision` found in the original code. This significantly reduces memory footprint and improves startup and inference speeds on embedded boards.
 
+## Core Features
+- **Hardware Acceleration**: Optimized for RK3588's 6 TOPS NPU architecture.
+- **Instance Segmentation**: High-performance mask generation and polygon contour extraction.
+- **Flexible Input**: Supports camera and local MP4 video input.
+
 ## Directory Structure
+- `lib/`: Contains `librknnrt.so` for RK3588.
+- `model/`: Stores `.rknn` models converted for RK3588 (e.g., `yolov8n-seg.rknn`).
+- `py_utils/`: Inference engine wrapper and lightweight segmentation post-processing utilities.
+- `web_detection.py`: Main program (supports Web preview and API).
 
-- `model/`: Directory for YOLOv8-Seg RKNN model file (`yolov8n-seg.rknn`)
-- `video/`: Directory for test video file (`test.mp4`)
-- `lib/`: NPU runtime dependency libraries (`librknnrt.so`)
-- `rknn-toolkit-lite2-packages/`: Python packages for RKNN-Toolkit-Lite2
-- `py_utils/`: Inference engine wrapper and lightweight segmentation post-processing utilities
-- `web_detection.py`: High-performance Web API service & video streaming
-- `requirements.txt`: Python dependencies list
+## Quick Start
 
-## Environment Setup
+### 1. Run the Project (One command, dual-mode preview)
 
-### 1. Hardware Requirements
-- Rockchip RK3588/RK3576 development board (e.g., reComputer RK-CV series)
-- USB Camera (for real-time detection)
+This project supports simultaneous preview via **Local GUI** and **Web Browser**. The program automatically detects the display environment and downgrades to Web mode if no display is connected.
 
-### 2. System Requirements
-- Ubuntu 20.04/22.04 or Debian 11 recommended
-- Kernel with NPU driver included
-
-### 3. Install Dependencies
-
+#### Step A: Configure Display Permissions (Optional)
+If you have a monitor connected and want to see the window locally:
 ```bash
-# 1. Update system and install dependencies
-sudo apt update
-sudo apt install -y python3-pip python3-dev libgl1-mesa-glx libglib2.0-0
-
-# 2. Install Python basic dependencies
-pip3 install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-# 3. Install RKNN-Toolkit-Lite2 (choose according to your Python version)
-# Example for Python 3.9:
-pip3 install rknn-toolkit-lite2-packages/rknn_toolkit_lite2-2.0.0b0-cp39-cp39-linux_aarch64.whl
+xhost +local:docker
 ```
 
-## Running Guide
+#### Step B: One-click Run
+```bash
+sudo docker run --rm --privileged --net=host \
+    -e PYTHONUNBUFFERED=1 \
+    -e RKNN_LOG_LEVEL=0 \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    recomputer-rk-cv/debug/rk3588-yolov8-seg:latest \
+    python3 web_detection.py --model_path model/yolov8n-seg.rknn --camera_id 0
+```
+Access via: `http://<Board_IP>:8000`
 
-> **Note:** Before running, please ensure that the quantized `yolov8n-seg.rknn` is placed in the `model/` directory, and the test video `test.mp4` is placed in the `video/` directory (to be provided by the user).
+> **Note**: If you need custom classes, you can add `-v $(pwd)/class_config.txt:/app/class_config.txt \` mount and `--class_path` parameter. The program defaults to COCO 80 classes.
 
-This project focuses on the High-performance Web Service mode, specifically designed for Web video streaming and APIs.
+Example:
 
 ```bash
-# Start service, process video/test.mp4 by default
-python3 web_detection.py --model_path model/yolov8n-seg.rknn --video video/test.mp4
-
-# Process camera feed (e.g., /dev/video0)
-python3 web_detection.py --model_path model/yolov8n-seg.rknn --camera_id 0
+sudo docker run --rm --privileged --net=host \
+    -e PYTHONUNBUFFERED=1 \
+    -e RKNN_LOG_LEVEL=0 \
+    -v $(pwd)/class_config.txt:/app/class_config.txt \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    recomputer-rk-cv/debug/rk3588-yolov8-seg:latest \
+    python3 web_detection.py --model_path model/yolov8n-seg.rknn --camera_id 0 --class_path class_config.txt
 ```
 
-## Web Access & API Description
+> **Note**: If you want to test with a local video instead of a camera, use the `--video_path` parameter:
+```bash
+sudo docker run --rm --privileged --net=host \
+    -e PYTHONUNBUFFERED=1 \
+    -e RKNN_LOG_LEVEL=0 \
+    -v $(pwd)/video:/app/video \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    recomputer-rk-cv/debug/rk3588-yolov8-seg:latest \
+    python3 web_detection.py --model_path model/yolov8n-seg.rknn --video_path video/test.mp4
+```
 
-After the service starts, it runs on `0.0.0.0:8000` by default.
+---
 
-### 1. Web Real-time Preview
-Access in browser: `http://<Board-IP>:8000`
-The page provides real-time video stream viewing (including the overlay rendering of target boxes and semi-transparent segmentation masks) and supports dynamic adjustment of Confidence and NMS thresholds.
+## 🔌 API Documentation
 
-### 2. RESTful APIs
+This project provides RESTful interfaces compatible with the Ultralytics Cloud API standard, supporting instance segmentation via image, video uploads or direct camera calls.
 
-- **Get current config**: `GET /api/config`
-- **Update config**: `POST /api/config`
-- **Get video stream**: `GET /api/video_feed`
-- **Inference prediction**: `POST /api/models/yolo11/predict`
-  - Supports uploading images (`file`)
-  - Supports uploading videos and specifying timestamp (`video`, `timestamp`)
-  - Supports using current camera frame (`realtime=true`)
-  - The return result includes class, confidence, bounding box (`box`), and **polygon contour coordinates (`polygons`)** extracted via `cv2.findContours`, making it easy for the frontend to render directly using SVG or Canvas.
+### 1. Model Inference Interface (Predict)
 
-## Performance Notes
+**Endpoint:** `POST /api/models/yolov8_seg/predict` (or `/api/models/yolo11/predict` depending on exact script mapping)
 
-- The project is configured by default to use `RKNNLite.NPU_CORE_0_1_2`, fully utilizing the 3 NPU cores of RK3588 (6 TOPS compute power).
-- With `torch` completely removed, the time overhead for model loading and mask computation is significantly reduced.
+#### Request Parameters (Multipart/Form-Data):
+- `file`: (Optional) Image file to be detected.
+- `video`: (Optional) MP4 video file to be detected.
+- `timestamp`: (Optional) Timestamp in the video file (seconds), returns detection results for the frame at that point. Default is 0.
+- `realtime`: (Optional) Boolean. If `true` or if no `file`/`video` parameters are provided, returns detection results for the current camera frame.
+- `conf`: (Optional) Confidence threshold for a single request, range 0.0-1.0.
+- `iou`: (Optional) NMS IOU threshold for a single request, range 0.0-1.0.
+
+#### Usage Examples:
+
+**1. Image Detection:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/models/yolov8_seg/predict" -F "file=@/home/cat/001.jpg"
+```
+
+**2. Video Specific Frame Detection:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/models/yolov8_seg/predict" -F "video=@/home/cat/test.mp4" -F "timestamp=5.5"
+```
+
+**3. Get Current Camera Frame Detection:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/models/yolov8_seg/predict" -F "realtime=true"
+```
+
+#### Response Format (JSON):
+```json
+{
+  "success": true,
+  "source": "video frame at 5.5s",
+  "predictions": [
+    {
+      "class": "person",
+      "confidence": 0.92,
+      "box": { "x1": 100, "y1": 200, "x2": 300, "y2": 500 },
+      "polygons": [
+        [100, 200], [150, 210], [160, 300], ...
+      ]
+    }
+  ],
+  "image": { "width": 1280, "height": 720 }
+}
+```
+
+### 2. System Configuration Interface (Config)
+
+Used to dynamically adjust thresholds for real-time video streams and default inference.
+
+#### Get Current Configuration
+- **Endpoint:** `GET /api/config`
+- **Response:** `{"obj_thresh": 0.25, "nms_thresh": 0.45}`
+
+#### Update System Configuration
+- **Endpoint:** `POST /api/config`
+- **Request Body (JSON):** `{"obj_thresh": 0.3, "nms_thresh": 0.5}`
+- **Response:** `{"status": "success"}`
+
+### 3. Real-time Video Stream Interface (Video Feed)
+
+Get real-time MJPEG video stream with detection boxes and segmentation masks drawn, can be directly embedded in HTML `<img>` tags.
+
+- **Endpoint:** `GET /api/video_feed`
+- **Example Usage:** `<img src="http://<Board_IP>:8000/api/video_feed">`
+
+---
+
+## 🛠️ Developer Guide (Production Recommendations)
+### Code Description
+- `web_detection.py`:
+    - **Dual-mode Support**: Integrates FastAPI, supporting both local rendering and MJPEG streaming output.
+    - **Environment Adaptive**: Automatically detects the `DISPLAY` environment variable, silently skipping GUI initialization if not present.
+    - **RKNN Inference**: Encapsulates RKNN initialization, model loading, and multi-core inference logic.
+    - **Dynamic Loading**: Supports dynamic class configuration loading via `--class_path`.
+    - **Post-processing**: High-performance Numpy-based bounding box decoding, NMS, and contour extraction (`cv2.findContours`).
+
+### Modifying Models
+1. Place the trained and converted .rknn model into the `model/` directory.
+2. Add the `--model_path` argument to the running command to point to the new model.

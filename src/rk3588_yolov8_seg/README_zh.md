@@ -1,78 +1,159 @@
 # RK3588 YOLOv8-Seg 实例分割与 Web 预览项目
 
-该项目基于 RKNN-Toolkit-Lite2，在瑞芯微 RK3588 平台上实现 YOLOv8-Seg 实例分割模型的高性能部署。项目采用纯 Python 架构，集成了 FastAPI 提供 Web API 和 MJPEG 视频流预览。
+该项目基于 RKNN-Toolkit-Lite2，在瑞芯微 RK3588 平台上实现 YOLOv8-Seg 实例分割模型的高性能部署。项目采用纯 Python 架构，集成了 FastAPI 提供 Web API 和 MJPEG 视频流预览，同时支持本地 GUI 实时显示。
 
-**特别说明**：本工程中的分割后处理逻辑（包含解码、NMS 非极大值抑制、Mask 解析与缩放、轮廓提取等）**全部使用纯 Numpy 与 OpenCV 进行了重写**，彻底解除了原版代码对 `torch` 和 `torchvision` 的重度依赖。这使得程序在嵌入式板端占用内存更小，启动与推理速度更快。
+**特别说明**：本项目的分割后处理逻辑（包含边界框解码、NMS、掩码解析与缩放、多边形轮廓提取）已经**完全使用纯 Numpy 与 OpenCV 进行了重写**，彻底去除了原版代码中对 `torch` 和 `torchvision` 的沉重依赖。这显著降低了内存占用，并提升了嵌入式板卡上的启动速度与推理速度。
+
+## 核心特性
+- **硬件加速**: 充分利用 RK3588 的 6 TOPS NPU 算力架构。
+- **实例分割**: 高性能掩码生成与多边形轮廓提取。
+- **灵活输入**: 支持摄像头和本地 MP4 视频输入。
 
 ## 目录结构
-
-- `model/`: 存放 YOLOv8-Seg 的 RKNN 模型文件 (`yolov8n-seg.rknn`)
-- `video/`: 存放用于测试的视频文件 (`test.mp4`)
 - `lib/`: 存放 NPU 运行时的依赖库 (`librknnrt.so`)
-- `rknn-toolkit-lite2-packages/`: 存放 RKNN-Toolkit-Lite2 的 Python 安装包
-- `py_utils/`: 包含推理引擎封装和 Seg 模型相关的轻量化后处理工具
-- `web_detection.py`: 高性能 Web API 服务与视频推流
-- `requirements.txt`: Python 依赖列表
+- `model/`: 存放用于 RK3588 转换好的 `.rknn` 模型 (如 `yolov8n-seg.rknn`)
+- `py_utils/`: 推理引擎封装与轻量级分割后处理工具
+- `web_detection.py`: 主程序 (支持 Web 预览和 API)
 
-## 环境准备
+## 快速开始
 
-### 1. 硬件要求
-- 瑞芯微 RK3588/RK3576 开发板 (例如: reComputer RK-CV 系列)
-- 支持 USB 摄像头 (用于实时检测)
+### 1. 运行项目 (单命令，双模式预览)
 
-### 2. 系统要求
-- 推荐使用 Ubuntu 20.04/22.04 或 Debian 11 系统
-- 内核已包含 NPU 驱动
+本项目支持 **本地 GUI** 和 **Web 浏览器** 同时预览。程序会自动检测显示环境，如果未连接显示器，则自动降级为纯 Web 模式。
 
-### 3. 安装依赖
-
+#### 步骤 A: 配置显示权限 (可选)
+如果连接了显示器并希望在本地看到窗口：
 ```bash
-# 1. 更新系统并安装系统依赖
-sudo apt update
-sudo apt install -y python3-pip python3-dev libgl1-mesa-glx libglib2.0-0
-
-# 2. 安装 Python 基础依赖
-pip3 install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-# 3. 安装 RKNN-Toolkit-Lite2 (根据 Python 版本选择)
-# 以 Python 3.9 为例：
-pip3 install rknn-toolkit-lite2-packages/rknn_toolkit_lite2-2.0.0b0-cp39-cp39-linux_aarch64.whl
+xhost +local:docker
 ```
 
-## 运行指南
+#### 步骤 B: 一键运行
+```bash
+sudo docker run --rm --privileged --net=host \
+    -e PYTHONUNBUFFERED=1 \
+    -e RKNN_LOG_LEVEL=0 \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    recomputer-rk-cv/debug/rk3588-yolov8-seg:latest \
+    python3 web_detection.py --model_path model/yolov8n-seg.rknn --camera_id 0
+```
+访问地址: `http://<开发板_IP>:8000`
 
-> **注意：** 在运行之前，请确保已将量化好的 `yolov8n-seg.rknn` 放入 `model/` 目录下，并将测试视频 `test.mp4` 放入 `video/` 目录下（用户自行补充）。
+> **注意**: 如果需要自定义类别，可以增加 `-v $(pwd)/class_config.txt:/app/class_config.txt \` 挂载和 `--class_path` 参数。程序默认使用 COCO 80 类。
 
-本项目专注于高性能 Web 服务模式，专为 Web 端视频流和 API 设计。
+示例：
 
 ```bash
-# 启动服务，默认处理 video/test.mp4
-python3 web_detection.py --model_path model/yolov8n-seg.rknn --video video/test.mp4
-
-# 处理摄像头画面 (如 /dev/video0)
-python3 web_detection.py --model_path model/yolov8n-seg.rknn --camera_id 0
+sudo docker run --rm --privileged --net=host \
+    -e PYTHONUNBUFFERED=1 \
+    -e RKNN_LOG_LEVEL=0 \
+    -v $(pwd)/class_config.txt:/app/class_config.txt \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    recomputer-rk-cv/debug/rk3588-yolov8-seg:latest \
+    python3 web_detection.py --model_path model/yolov8n-seg.rknn --camera_id 0 --class_path class_config.txt
 ```
 
-## Web 访问与 API 说明
+> **注意**: 如果你想使用本地视频进行测试而不是摄像头，请使用 `--video_path` 参数：
+```bash
+sudo docker run --rm --privileged --net=host \
+    -e PYTHONUNBUFFERED=1 \
+    -e RKNN_LOG_LEVEL=0 \
+    -v $(pwd)/video:/app/video \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    recomputer-rk-cv/debug/rk3588-yolov8-seg:latest \
+    python3 web_detection.py --model_path model/yolov8n-seg.rknn --video_path video/test.mp4
+```
 
-服务启动后，默认运行在 `0.0.0.0:8000`。
+---
 
-### 1. Web 实时预览
-在浏览器中访问：`http://<开发板IP>:8000`
-页面提供实时视频流查看（包含目标框和半透明分割掩码的叠加渲染），并支持动态调整置信度 (Confidence) 和 NMS 阈值。
+## 🔌 API 接口文档
 
-### 2. RESTful API 接口
+本项目提供了兼容 Ultralytics Cloud API 标准的 RESTful 接口，支持通过图片、视频上传或直接调用摄像头进行实例分割检测。
 
-- **获取当前配置**: `GET /api/config`
-- **更新配置**: `POST /api/config`
-- **获取视频流**: `GET /api/video_feed`
-- **推理预测**: `POST /api/models/yolo11/predict`
-  - 支持上传图片 (`file`)
-  - 支持上传视频并指定时间戳 (`video`, `timestamp`)
-  - 支持使用当前摄像头画面 (`realtime=true`)
-  - 返回结果包含类别、置信度、边界框 (`box`) 以及通过 `cv2.findContours` 提取的 **多边形轮廓坐标 (`polygons`)**，方便前端直接使用 SVG 或 Canvas 进行渲染。
+### 1. 模型推理接口 (Predict)
 
-## 性能说明
+**接口路径:** `POST /api/models/yolov8_seg/predict` (或 `/api/models/yolo11/predict` 具体取决于脚本映射)
 
-- 项目已默认配置使用 `RKNNLite.NPU_CORE_0_1_2`，充分利用 RK3588 的 3 个 NPU 核心 (6 TOPS 算力)。
-- 彻底移除了 `torch` 后，模型加载和掩码计算的时间开销显著降低。
+#### 请求参数 (Multipart/Form-Data):
+- `file`: (可选) 需要检测的图片文件。
+- `video`: (可选) 需要检测的 MP4 视频文件。
+- `timestamp`: (可选) 视频文件中的时间戳 (秒)，返回该时刻对应帧的检测结果。默认为 0。
+- `realtime`: (可选) 布尔值。如果为 `true` 或未提供 `file`/`video` 参数，则返回当前摄像头帧的检测结果。
+- `conf`: (可选) 单次请求的置信度阈值，范围 0.0-1.0。
+- `iou`: (可选) 单次请求的 NMS IOU 阈值，范围 0.0-1.0。
+
+#### 使用示例:
+
+**1. 图片检测:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/models/yolov8_seg/predict" -F "file=@/home/cat/001.jpg"
+```
+
+**2. 视频指定帧检测:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/models/yolov8_seg/predict" -F "video=@/home/cat/test.mp4" -F "timestamp=5.5"
+```
+
+**3. 获取当前摄像头帧检测:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/models/yolov8_seg/predict" -F "realtime=true"
+```
+
+#### 响应格式 (JSON):
+返回结果包含了提取出的**多边形轮廓坐标 (`polygons`)**，方便前端直接使用 SVG 或 Canvas 渲染。
+```json
+{
+  "success": true,
+  "source": "video frame at 5.5s",
+  "predictions": [
+    {
+      "class": "person",
+      "confidence": 0.92,
+      "box": { "x1": 100, "y1": 200, "x2": 300, "y2": 500 },
+      "polygons": [
+        [100, 200], [150, 210], [160, 300]
+      ]
+    }
+  ],
+  "image": { "width": 1280, "height": 720 }
+}
+```
+
+### 2. 系统配置接口 (Config)
+
+用于动态调整实时视频流和默认推理的阈值。
+
+#### 获取当前配置
+- **接口路径:** `GET /api/config`
+- **响应:** `{"obj_thresh": 0.25, "nms_thresh": 0.45}`
+
+#### 更新系统配置
+- **接口路径:** `POST /api/config`
+- **请求体 (JSON):** `{"obj_thresh": 0.3, "nms_thresh": 0.5}`
+- **响应:** `{"status": "success"}`
+
+### 3. 实时视频流接口 (Video Feed)
+
+获取绘制了检测框和半透明掩码的实时 MJPEG 视频流，可直接嵌入到 HTML `<img>` 标签中。
+
+- **接口路径:** `GET /api/video_feed`
+- **调用示例:** `<img src="http://<开发板_IP>:8000/api/video_feed">`
+
+---
+
+## 🛠️ 开发者指南 (生产环境建议)
+### 代码结构说明
+- `web_detection.py`:
+    - **双模式支持**: 集成了 FastAPI，同时支持本地渲染和 MJPEG 流媒体输出。
+    - **环境自适应**: 自动检测 `DISPLAY` 环境变量，如果不存在则静默跳过 GUI 初始化。
+    - **RKNN 推理**: 封装了 RKNN 初始化、模型加载和多核推理逻辑。
+    - **动态加载**: 支持通过 `--class_path` 动态加载类别配置。
+    - **后处理**: 基于纯 Numpy 实现的高性能边界框解码、NMS 与轮廓提取 (`cv2.findContours`)。
+
+### 修改模型
+1. 将训练并转换好的 .rknn 模型放入 `model/` 目录。
+2. 在运行命令中添加 `--model_path` 参数指向新模型。
