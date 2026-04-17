@@ -1,78 +1,145 @@
-# RK3576 YOLOv8 目标检测与 Web 预览项目
+# RK3576 YOLOv8 部署指南
 
-该项目基于 RKNN-Toolkit-Lite2，在瑞芯微 RK3576 平台上实现 YOLOv8 目标检测模型的高性能部署。项目采用纯 Python 架构，集成了 FastAPI 提供 Web API 和 MJPEG 视频流预览。
+[English] | [中文](./README_zh.md)
 
-**特别说明**：本工程中的后处理逻辑（包含 DFL 解码和 NMS 非极大值抑制等）**全部使用纯 Numpy 与 OpenCV 进行了重写**，彻底解除了原版 `yolov8.py` 代码对 `torch` 和 `torchvision` 的重度依赖。这使得程序在嵌入式板端占用内存极小，启动与推理速度极快。
+本目录包含针对 RK3576 优化的 YOLOv8 推理代码。
+
+## 核心特性
+- **硬件加速**：针对 RK3576 的 2 TOPS NPU 架构进行了优化。
+- **最新驱动**：集成支持 RK3576 的第 5 代 NPU 运行时库。
+- **灵活输入**：支持摄像头和本地 MP4 视频输入。
 
 ## 目录结构
+- `lib/`：包含 RK3576 版 `librknnrt.so`。
+- `model/`：存放针对 RK3576 转换的 `.rknn` 模型 (如 `yolov8n.rknn`)。
+- `py_utils/`: 推理引擎封装与后处理工具。
+- `web_detection.py`：主程序（支持 Web 预览与 API）。
 
-- `model/`: 存放 YOLOv8 的 RKNN 模型文件 (`yolov8n.rknn`)
-- `video/`: 存放用于测试的视频文件 (`test.mp4`)
-- `lib/`: 存放 NPU 运行时的依赖库 (`librknnrt.so`)
-- `rknn-toolkit-lite2-packages/`: 存放 RKNN-Toolkit-Lite2 的 Python 安装包
-- `py_utils/`: 包含推理引擎封装和目标检测相关的轻量化后处理工具
-- `web_detection.py`: 高性能 Web API 服务与视频推流
-- `requirements.txt`: Python 依赖列表
+## 快速开始
 
-## 环境准备
+### 1. 运行项目 (一条命令，双模预览)
 
-### 1. 硬件要求
-- 瑞芯微 RK3576/RK3576 开发板 (例如: reComputer RK-CV 系列)
-- 支持 USB 摄像头 (用于实时检测)
+本项目支持 **本地 GUI** 与 **Web 浏览器** 双模式同时预览。程序会自动检测显示器环境，无显示器时自动降级为 Web 模式。
 
-### 2. 系统要求
-- 推荐使用 Ubuntu 20.04/22.04 或 Debian 11 系统
-- 内核已包含 NPU 驱动
-
-### 3. 安装依赖
-
+#### 步骤 A：配置显示权限 (可选)
+如果您连接了显示器并希望在本地看到窗口：
 ```bash
-# 1. 更新系统并安装系统依赖
-sudo apt update
-sudo apt install -y python3-pip python3-dev libgl1-mesa-glx libglib2.0-0
-
-# 2. 安装 Python 基础依赖
-pip3 install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-# 3. 安装 RKNN-Toolkit-Lite2 (根据 Python 版本选择)
-# 以 Python 3.9 为例：
-pip3 install rknn-toolkit-lite2-packages/rknn_toolkit_lite2-2.0.0b0-cp39-cp39-linux_aarch64.whl
+xhost +local:docker
 ```
 
-## 运行指南
+#### 步骤 B：一键运行
+```bash
+sudo docker run --rm --privileged --net=host \
+    -e PYTHONUNBUFFERED=1 \
+    -e RKNN_LOG_LEVEL=0 \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    recomputer-rk-cv/debug/rk3576_yolov8:latest \
+    python3 web_detection.py --model_path model/yolov8n.rknn --camera_id 0
+```
+访问方式：`http://<开发板IP>:8000`
 
-> **注意：** 在运行之前，请确保已将量化好的 `yolov8n.rknn` 放入 `model/` 目录下，并将测试视频 `test.mp4` 放入 `video/` 目录下（用户自行补充）。
+> **注意**: 如果需要自定义类别，可以增加 `-v $(pwd)/class_config.txt:/app/class_config.txt \` 挂载和 `--class_path` 参数，程序默认使用 COCO 80 类。
 
-本项目专注于高性能 Web 服务模式，专为 Web 端视频流和 API 设计。
+例如：
 
 ```bash
-# 启动服务，默认处理 video/test.mp4
-python3 web_detection.py --model_path model/yolov8n.rknn --video video/test.mp4
-
-# 处理摄像头画面 (如 /dev/video0)
-python3 web_detection.py --model_path model/yolov8n.rknn --camera_id 0
+sudo docker run --rm --privileged --net=host \
+    -e PYTHONUNBUFFERED=1 \
+    -e RKNN_LOG_LEVEL=0 \
+    -v $(pwd)/class_config.txt:/app/class_config.txt \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    recomputer-rk-cv/debug/rk3576_yolov8:latest \
+    python3 web_detection.py --model_path model/yolov8n.rknn --camera_id 0 --class_path class_config.txt
 ```
 
-## Web 访问与 API 说明
+---
 
-服务启动后，默认运行在 `0.0.0.0:8000`。
+## 🔌 API 接口文档
 
-### 1. Web 实时预览
-在浏览器中访问：`http://<开发板IP>:8000`
-页面提供实时视频流查看（包含目标框的叠加渲染），并支持动态调整置信度 (Confidence) 和 NMS 阈值。
+本项目提供了兼容 Ultralytics Cloud API 标准的 RESTful 接口，支持通过 HTTP POST 请求上传图片、视频或直接调用摄像头进行目标检测。
 
-### 2. RESTful API 接口
+### 1. 模型推理接口 (Predict)
 
-- **获取当前配置**: `GET /api/config`
-- **更新配置**: `POST /api/config`
-- **获取视频流**: `GET /api/video_feed`
-- **推理预测**: `POST /api/models/yolov8/predict`
-  - 支持上传图片 (`file`)
-  - 支持上传视频并指定时间戳 (`video`, `timestamp`)
-  - 支持使用当前摄像头画面 (`realtime=true`)
-  - 返回结果包含类别、置信度、边界框 (`box`)。
+**Endpoint:** `POST /api/models/yolov8/predict`
 
-## 性能说明
+#### 请求参数 (Multipart/Form-Data):
+- `file`: (可选) 待检测的图片文件。
+- `video`: (可选) 待检测的 MP4 视频文件。
+- `timestamp`: (可选) 视频文件的时间戳（单位：秒），返回该时间点的视频帧检测结果。默认为 0。
+- `realtime`: (可选) 布尔值。若为 `true` 或未提供 `file`/`video` 参数，则返回摄像头当前帧的检测结果。
+- `conf`: (可选) 单次请求的置信度阈值，范围 0.0-1.0。
+- `iou`: (可选) 单次请求的 NMS IOU 阈值，范围 0.0-1.0。
 
-- 项目已默认配置使用 `RKNNLite.NPU_CORE_0_1_2`，充分利用 RK3576 的 3 个 NPU 核心 (6 TOPS 算力)。
-- 彻底移除了 `torch` 后，模型加载和 DFL 解码的计算时间开销显著降低。
+#### 调用示例:
+
+**1. 图片检测:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/models/yolov8/predict" -F "file=@/home/cat/001.jpg"
+```
+
+**2. 视频特定时间帧检测:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/models/yolov8/predict" -F "video=@/home/cat/test.mp4" -F "timestamp=5.5"
+```
+
+**3. 获取摄像头当前帧检测:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/models/yolov8/predict" -F "realtime=true"
+# 或者不传文件参数
+curl -X POST "http://127.0.0.1:8000/api/models/yolov8/predict"
+```
+
+#### 响应格式 (JSON):
+```json
+{
+  "success": true,
+  "source": "video frame at 5.5s",
+  "predictions": [
+    {
+      "class": "person",
+      "confidence": 0.92,
+      "box": { "x1": 100, "y1": 200, "x2": 300, "y2": 500 }
+    }
+  ],
+  "image": { "width": 1280, "height": 720 }
+}
+```
+
+### 2. 系统配置接口 (Config)
+
+用于动态调整实时视频流和默认推理的阈值。
+
+#### 获取当前配置
+- **Endpoint:** `GET /api/config`
+- **响应:** `{"obj_thresh": 0.25, "nms_thresh": 0.45}`
+
+#### 更新系统配置
+- **Endpoint:** `POST /api/config`
+- **请求体 (JSON):** `{"obj_thresh": 0.3, "nms_thresh": 0.5}`
+- **响应:** `{"status": "success"}`
+
+### 3. 实时视频流接口 (Video Feed)
+
+获取带有检测框绘制的实时 MJPEG 视频流，可直接嵌入 HTML `<img>` 标签。
+
+- **Endpoint:** `GET /api/video_feed`
+- **使用示例:** `<img src="http://<开发板IP>:8000/api/video_feed">`
+
+---
+
+## 🛠️ 开发者指南 (量产建议)
+### 代码说明
+- `web_detection.py`:
+    - **双模支持**: 集成 FastAPI，同时支持本地渲染和 MJPEG 流式输出。
+    - **环境自适应**: 自动检测 `DISPLAY` 环境变量，无环境时静默跳过 GUI 初始化。
+    - **RKNN 推理**: 封装了 RKNN 初始化、加载模型、多核推理逻辑。
+    - **动态加载**: 支持通过 `--class_path` 动态加载类别配置。
+    - **后处理**: YOLOv8 专用的 Box 解码与 NMS 逻辑。
+
+### 修改模型
+1. 将训练好并转换完成的 .rknn 模型放入 `model/` 目录。
+2. 运行命令时可添加 `--model_path` 参数指向新模型。

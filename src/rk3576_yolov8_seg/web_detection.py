@@ -283,13 +283,13 @@ async def predict(
 
         predictions = []
         if boxes is not None and len(boxes) > 0:
+            real_boxes = _global_co_helper.get_real_box(boxes)
             for i in range(len(boxes)):
-                box = boxes[i]
+                box = real_boxes[i]
                 score = scores[i]
                 cl = classes[i]
                 seg = seg_img[i]
                 
-                real_box = _global_co_helper.get_real_box(box)
                 real_mask = _global_co_helper.get_real_mask(seg, (h, w))
                 
                 # 提取多边形轮廓
@@ -306,10 +306,10 @@ async def predict(
                     "class": CLASSES[cl],
                     "confidence": float(score),
                     "box": {
-                        "x1": int(real_box[0]),
-                        "y1": int(real_box[1]),
-                        "x2": int(real_box[2]),
-                        "y2": int(real_box[3])
+                        "x1": int(box[0]),
+                        "y1": int(box[1]),
+                        "x2": int(box[2]),
+                        "y2": int(box[3])
                     },
                     "polygons": polygons
                 })

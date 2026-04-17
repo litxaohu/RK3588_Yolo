@@ -1,92 +1,151 @@
-# RK3576 YOLOv5-Seg 高性能 Web 服务
+# RK3576 YOLOv5-Seg 部署指南
 
-本项目在瑞芯微 RK3576 平台上基于 RKNN-Toolkit-Lite2 实现了 YOLOv5-Seg 实例分割模型的高性能部署。采用纯 Python 架构，去除了原本极度依赖 PyTorch 的后处理，并专注于集成 FastAPI 提供高并发 Web API 与带有掩码渲染的 MJPEG 视频流，完美契合工业级量产后端部署需求。
+[English] | [中文](./README_zh.md)
+
+本目录包含针对 RK3576 优化的 YOLOv5-Seg 实例分割推理代码。
+
+**特别说明**：本项目的分割后处理逻辑（包含边界框解码、NMS、掩码解析与缩放、多边形轮廓提取）已经**完全使用纯 Numpy 与 OpenCV 进行了重写**，彻底去除了原版代码中对 `torch` 和 `torchvision` 的沉重依赖。这显著降低了内存占用，并提升了嵌入式板卡上的启动速度与推理速度。
+
+## 核心特性
+- **硬件加速**：针对 RK3576 的 2 TOPS NPU 架构进行了优化。
+- **实例分割**: 高性能掩码生成与多边形轮廓提取。
+- **灵活输入**：支持摄像头和本地 MP4 视频输入。
 
 ## 目录结构
+- `lib/`：包含 RK3576 版 `librknnrt.so`。
+- `model/`：存放针对 RK3576 转换的 `.rknn` 模型 (如 `yolov5s-seg.rknn`)。
+- `py_utils/`: 推理引擎封装与轻量级分割后处理工具。
+- `web_detection.py`：主程序（支持 Web 预览与 API）。
 
-- `model/`: YOLOv5-Seg RKNN 模型文件 (`yolov5s_seg.rknn`) 及先验框配置 (`anchors_yolov5.txt`) 存放目录
-- `video/`: 测试视频文件 (`test.mp4`) 存放目录
-- `lib/`: NPU 运行依赖动态库 (`librknnrt.so`)
-- `rknn-toolkit-lite2-packages/`: RKNN-Toolkit-Lite2 官方 Python 安装包
-- `py_utils/`: 推理引擎封装及纯 Numpy/OpenCV 实现的 YOLOv5 实例分割后处理工具
-- `web_detection.py`: 多线程 Web API 服务及视频流核心程序
-- `requirements.txt`: Python 依赖清单
+## 快速开始
 
-## 环境配置
+### 1. 运行项目 (一条命令，双模预览)
 
-### 1. 系统要求
-- 瑞芯微 RK3576 平台 (如 reComputer RK-CV)
-- Ubuntu 20.04 / Debian 11 系统
-- Python 3.7+
+本项目支持 **本地 GUI** 与 **Web 浏览器** 双模式同时预览。程序会自动检测显示器环境，无显示器时自动降级为 Web 模式。
 
-### 2. 安装依赖包
-
-安装基础依赖（注意：本工程的分割后处理**不需要安装 PyTorch/Torchvision**）：
+#### 步骤 A：配置显示权限 (可选)
+如果您连接了显示器并希望在本地看到窗口：
 ```bash
-pip3 install -r requirements.txt
+xhost +local:docker
 ```
 
-安装 RKNN-Toolkit-Lite2 (请根据板端 Python 版本选择对应的 `.whl` 文件)：
+#### 步骤 B：一键运行
 ```bash
-# 以 Python 3.9 为例:
-pip3 install rknn-toolkit-lite2-packages/rknn_toolkit_lite2-2.0.0b0-cp39-cp39-linux_aarch64.whl
+sudo docker run --rm --privileged --net=host \
+    -e PYTHONUNBUFFERED=1 \
+    -e RKNN_LOG_LEVEL=0 \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    recomputer-rk-cv/debug/rk3576_yolov5_seg:latest \
+    python3 web_detection.py --model_path model/yolov5s-seg.rknn --camera_id 0
+```
+访问方式：`http://<开发板IP>:8000`
+
+> **注意**: 如果需要自定义类别，可以增加 `-v $(pwd)/class_config.txt:/app/class_config.txt \` 挂载和 `--class_path` 参数，程序默认使用 COCO 80 类。
+
+例如：
+
+```bash
+sudo docker run --rm --privileged --net=host \
+    -e PYTHONUNBUFFERED=1 \
+    -e RKNN_LOG_LEVEL=0 \
+    -v $(pwd)/class_config.txt:/app/class_config.txt \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/dri/renderD128:/dev/dri/renderD128 \
+    -v /proc/device-tree/compatible:/proc/device-tree/compatible \
+    recomputer-rk-cv/debug/rk3576_yolov5_seg:latest \
+    python3 web_detection.py --model_path model/yolov5s-seg.rknn --camera_id 0 --class_path class_config.txt
 ```
 
-## 运行指南
+---
 
-> **注意：** 运行前请确保已将量化好的 `yolov5s_seg.rknn` 和对应的 `anchors_yolov5.txt` 放置在 `model/` 目录下，测试视频 `test.mp4` 放置在 `video/` 目录下（此部分需用户自行补全）。
+## 🔌 API 接口文档
 
-本项目专注于高性能 Web 服务 (`web_detection.py`)，抛弃了本地实时弹窗检测脚本。
+本项目提供了兼容 Ultralytics Cloud API 标准的 RESTful 接口，支持通过 HTTP POST 请求上传图片、视频或直接调用摄像头进行实例分割检测。
 
+### 1. 模型推理接口 (Predict)
+
+**Endpoint:** `POST /api/models/yolov5_seg/predict`
+
+#### 请求参数 (Multipart/Form-Data):
+- `file`: (可选) 待检测的图片文件。
+- `video`: (可选) 待检测的 MP4 视频文件。
+- `timestamp`: (可选) 视频文件的时间戳（单位：秒），返回该时间点的视频帧检测结果。默认为 0。
+- `realtime`: (可选) 布尔值。若为 `true` 或未提供 `file`/`video` 参数，则返回摄像头当前帧的检测结果。
+- `conf`: (可选) 单次请求的置信度阈值，范围 0.0-1.0。
+- `iou`: (可选) 单次请求的 NMS IOU 阈值，范围 0.0-1.0。
+
+#### 调用示例:
+
+**1. 图片检测:**
 ```bash
-# 启动服务，默认处理 video/test.mp4
-python3 web_detection.py --model_path model/yolov5s_seg.rknn --anchors model/anchors_yolov5.txt --video_path video/test.mp4
-
-# 处理摄像头画面 (默认使用 /dev/video1)
-python3 web_detection.py --model_path model/yolov5s_seg.rknn --anchors model/anchors_yolov5.txt --camera_id 1
-
-# 纯 Web 模式 (不处理本地视频源，仅供上传推理)
-python3 web_detection.py --model_path model/yolov5s_seg.rknn --anchors model/anchors_yolov5.txt --camera_id -1
+curl -X POST "http://127.0.0.1:8000/api/models/yolov5_seg/predict" -F "file=@/home/cat/001.jpg"
 ```
 
-## Web 访问与 API 说明
+**2. 视频特定时间帧检测:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/models/yolov5_seg/predict" -F "video=@/home/cat/test.mp4" -F "timestamp=5.5"
+```
 
-服务启动后，默认运行在 `0.0.0.0:8000`。
+**3. 获取摄像头当前帧检测:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/models/yolov5_seg/predict" -F "realtime=true"
+# 或者不传文件参数
+curl -X POST "http://127.0.0.1:8000/api/models/yolov5_seg/predict"
+```
 
-### 1. Web 实时预览
-在浏览器中访问：`http://<开发板IP>:8000`
-- 提供实时视频流预览，并叠加半透明的实例分割掩码 (Mask)
-- 支持动态调节置信度 (Confidence) 与 NMS 阈值
-- 支持上传本地视频进行后端队列分析
-
-### 2. 视频分析 API
-- `POST /api/video/upload`: 上传视频文件
-- `POST /api/video/analyze`: 提交视频分析任务
-- `GET /api/video/status`: 查询分析进度
-- `GET /api/video/download/{filename}`: 下载分析完成的视频
-
-### 3. 图像推理 API
-- **接口路径**: `POST /api/models/yolov5_seg/predict`
-- **参数说明 (Form/File)**:
-  - `file`: 上传的图片文件
-  - `video`: 上传的视频文件 (配合 timestamp 使用)
-  - `timestamp`: 提取视频指定时间的帧 (秒)
-  - `realtime`: 布尔值，使用当前摄像头帧
-  - `conf`: 置信度阈值 (可选)
-  - `iou`: NMS IOU 阈值 (可选)
-- **返回示例**:
+#### 响应格式 (JSON):
+返回结果包含了提取出的**多边形轮廓坐标 (`polygons`)**，方便前端直接使用 SVG 或 Canvas 渲染。
 ```json
 {
   "success": true,
-  "source": "uploaded image",
+  "source": "video frame at 5.5s",
   "predictions": [
     {
       "class": "person",
-      "confidence": 0.89,
-      "box": {"x1": 100, "y1": 50, "x2": 200, "y2": 300}
+      "confidence": 0.92,
+      "box": { "x1": 100, "y1": 200, "x2": 300, "y2": 500 },
+      "polygons": [
+        [100, 200], [150, 210], [160, 300]
+      ]
     }
   ],
-  "image": {"width": 1280, "height": 720}
+  "image": { "width": 1280, "height": 720 }
 }
 ```
-*(注：为了节省网络带宽，API JSON 响应中不直接返回由 0/1 构成的掩码数组。如果前端需要分割效果图，可以通过其他流式接口获取。)*
+
+### 2. 系统配置接口 (Config)
+
+用于动态调整实时视频流和默认推理的阈值。
+
+#### 获取当前配置
+- **Endpoint:** `GET /api/config`
+- **响应:** `{"obj_thresh": 0.25, "nms_thresh": 0.45}`
+
+#### 更新系统配置
+- **Endpoint:** `POST /api/config`
+- **请求体 (JSON):** `{"obj_thresh": 0.3, "nms_thresh": 0.5}`
+- **响应:** `{"status": "success"}`
+
+### 3. 实时视频流接口 (Video Feed)
+
+获取带有检测框绘制的实时 MJPEG 视频流，可直接嵌入 HTML `<img>` 标签。
+
+- **Endpoint:** `GET /api/video_feed`
+- **使用示例:** `<img src="http://<开发板IP>:8000/api/video_feed">`
+
+---
+
+## 🛠️ 开发者指南 (量产建议)
+### 代码说明
+- `web_detection.py`:
+    - **双模支持**: 集成 FastAPI，同时支持本地渲染和 MJPEG 流式输出。
+    - **环境自适应**: 自动检测 `DISPLAY` 环境变量，无环境时静默跳过 GUI 初始化。
+    - **RKNN 推理**: 封装了 RKNN 初始化、加载模型、多核推理逻辑。
+    - **动态加载**: 支持通过 `--class_path` 动态加载类别配置。
+    - **后处理**: 基于纯 Numpy 实现的高性能边界框解码、NMS 与轮廓提取 (`cv2.findContours`)。
+
+### 修改模型
+1. 将训练好并转换完成的 .rknn 模型放入 `model/` 目录。
+2. 运行命令时可添加 `--model_path` 参数指向新模型。

@@ -322,10 +322,10 @@ async def predict(
                     "class": CLASSES[box.classId],
                     "confidence": float(box.score),
                     "box": {
-                        "x1": real_box[0],
-                        "y1": real_box[1],
-                        "x2": real_box[2],
-                        "y2": real_box[3]
+                        "x1": int(real_box[0]),
+                        "y1": int(real_box[1]),
+                        "x2": int(real_box[2]),
+                        "y2": int(real_box[3])
                     },
                     "keypoints": keypoints_list
                 })

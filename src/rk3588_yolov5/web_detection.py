@@ -277,17 +277,17 @@ async def predict(
         boxes, classes, scores = post_process(outputs, _global_anchors, target_conf, target_iou)
 
         predictions = []
-        if boxes is not None:
-            for box, score, cl in zip(boxes, scores, classes):
-                real_box = _global_co_helper.get_real_box(box)
+        if boxes is not None and len(boxes) > 0:
+            real_boxes = _global_co_helper.get_real_box(boxes)
+            for box, score, cl in zip(real_boxes, scores, classes):
                 predictions.append({
                     "class": CLASSES[cl],
                     "confidence": float(score),
                     "box": {
-                        "x1": int(real_box[0]),
-                        "y1": int(real_box[1]),
-                        "x2": int(real_box[2]),
-                        "y2": int(real_box[3])
+                        "x1": int(box[0]),
+                        "y1": int(box[1]),
+                        "x2": int(box[2]),
+                        "y2": int(box[3])
                     }
                 })
 
