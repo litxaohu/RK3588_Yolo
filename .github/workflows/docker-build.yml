@@ -12,6 +12,12 @@ on:
       - 'src/rk3576_yolov8_pose/**'
       - 'src/rk3588_yolov8_seg/**'
       - 'src/rk3576_yolov8_seg/**'
+      - 'src/rk3588_yolov5/**'
+      - 'src/rk3576_yolov5/**'
+      - 'src/rk3588_yolov5_seg/**'
+      - 'src/rk3576_yolov5_seg/**'
+      - 'src/rk3588_yolov8/**'
+      - 'src/rk3576_yolov8/**'
       - 'docker/**'
     tags: ['v*.*.*']
   pull_request:
@@ -60,6 +66,24 @@ jobs:
           - platform: rk3576
             src_dir: rk3576_yolov8_seg
             dockerfile: Yolov8_seg.dockerfile
+          - platform: rk3588
+            src_dir: rk3588_yolov5
+            dockerfile: Yolov5.dockerfile
+          - platform: rk3576
+            src_dir: rk3576_yolov5
+            dockerfile: Yolov5.dockerfile
+          - platform: rk3588
+            src_dir: rk3588_yolov5_seg
+            dockerfile: Yolov5_seg.dockerfile
+          - platform: rk3576
+            src_dir: rk3576_yolov5_seg
+            dockerfile: Yolov5_seg.dockerfile
+          - platform: rk3588
+            src_dir: rk3588_yolov8
+            dockerfile: Yolov8.dockerfile
+          - platform: rk3576
+            src_dir: rk3576_yolov8
+            dockerfile: Yolov8.dockerfile
     
     steps:
       - name: Checkout Code
