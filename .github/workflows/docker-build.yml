@@ -18,6 +18,8 @@ on:
       - 'src/rk3576_yolov5_seg/**'
       - 'src/rk3588_yolov8/**'
       - 'src/rk3576_yolov8/**'
+      - 'src/rk3588_whisper/**'
+      - 'src/rk3576_whisper/**'
       - 'docker/**'
     tags: ['v*.*.*']
   pull_request:
@@ -84,6 +86,12 @@ jobs:
           - platform: rk3576
             src_dir: rk3576_yolov8
             dockerfile: Yolov8.dockerfile
+          - platform: rk3588
+            src_dir: rk3588_whisper
+            dockerfile: Whisper.dockerfile
+          - platform: rk3576
+            src_dir: rk3576_whisper
+            dockerfile: Whisper.dockerfile
     
     steps:
       - name: Checkout Code
